@@ -1,0 +1,9 @@
+{
+  "absolute": true,
+  "format": ["typescript", "vue"],
+  "ignore": ["**/dist/**", "**/coverage/**", "**/*.test.ts", "**/*.integration.test.ts"],
+  "min-lines": 8,
+  "min-tokens": 60,
+  "reporters": ["console"],
+  "threshold": 3
+}

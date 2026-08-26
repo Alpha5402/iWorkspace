@@ -1,0 +1,21 @@
+{
+  "name": "@delivery/sandbox-runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup src/main.ts --format esm --sourcemap --clean",
+    "dev": "NODE_OPTIONS=--conditions=development tsx watch --env-file=../../.env src/main.ts",
+    "start": "node --env-file=../../.env dist/main.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@delivery/health": "workspace:*",
+    "@delivery/observability": "workspace:*",
+    "dockerode": "5.0.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/dockerode": "4.0.1"
+  }
+}
