@@ -241,7 +241,7 @@ infra/
 - [x] Review 输入、批次、模型调用、Finding 和报告通过 Artifact Link/Evidence 记录血缘。
 - [x] 生成固定 JSON、争议项、批次摘要、Coverage Manifest、文本摘要和 HTML 报告。
 - [x] 校验失败会清理临时对象，Artifact 下载时复核内容哈希。
-- [ ] 增加进程崩溃遗留临时对象及“正式对象成功、元数据事务回滚”孤儿对象的定时 GC。
+- [x] 增加进程崩溃遗留临时对象及“正式对象成功、元数据事务回滚”孤儿对象的定时 GC；使用可配置安全宽限期、有界分页、数据库引用复核和单飞调度，避免删除仍可能提交的对象。
 
 ### M1-06：Ruleset 与 Diff Pipeline
 

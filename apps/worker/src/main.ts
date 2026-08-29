@@ -11,6 +11,10 @@ import { HttpEmailProvider } from '@delivery/providers-email';
 import { GitHubAppProvider } from '@delivery/providers-github';
 
 import { loadWorkerConfig } from './config.js';
+import {
+  ArtifactGarbageCollector,
+  createArtifactReferenceLookup,
+} from './artifactGarbageCollector.js';
 import { EmailDeliveryWorker } from './emailDeliveryWorker.js';
 import { ReviewWorker } from './reviewWorker.js';
 
@@ -71,6 +75,24 @@ const emailWorker =
         `${hostname()}:${process.pid}:email:${randomUUID()}`,
         logger,
       );
+const artifactGarbageCollectionStore =
+  config.m1 === undefined || database === undefined
+    ? undefined
+    : new ImmutableArtifactStore(config.m1.objectStorage);
+const artifactGarbageCollector =
+  config.m1 === undefined || database === undefined || artifactGarbageCollectionStore === undefined
+    ? undefined
+    : new ArtifactGarbageCollector(
+        createArtifactReferenceLookup(database),
+        artifactGarbageCollectionStore,
+        {
+          ...config.m1.artifactGarbageCollection,
+          onError: (error) => {
+            logger.error({ error }, 'artifact garbage collection failed');
+          },
+        },
+      );
+artifactGarbageCollector?.start();
 await Promise.all([reviewWorker?.start(), emailWorker?.start()]);
 
 let shuttingDown = false;
@@ -80,7 +102,12 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shuttingDown = true;
   logger.info({ signal }, 'worker shutting down');
   healthServer.close();
-  await Promise.all([reviewWorker?.close(), emailWorker?.close()]);
+  await Promise.all([
+    reviewWorker?.close(),
+    emailWorker?.close(),
+    artifactGarbageCollector?.close(),
+  ]);
+  artifactGarbageCollectionStore?.close();
   await database?.destroy();
   await readinessProbe.close();
   await telemetry.shutdown();

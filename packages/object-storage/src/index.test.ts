@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CopyObjectCommand } from '@aws-sdk/client-s3';
+import { CopyObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 
 import {
   createObjectStorageProbe,
@@ -126,5 +126,34 @@ describe('immutable artifact store', () => {
       send: vi.fn().mockResolvedValue({}),
     }));
     await expect(store.get('artifacts/missing')).rejects.toThrow('ARTIFACT_BODY_MISSING');
+  });
+
+  it('lists only complete object metadata and deletes an explicit object key', async () => {
+    const send = vi
+      .fn<(command: unknown) => Promise<unknown>>()
+      .mockResolvedValueOnce({
+        Contents: [
+          { Key: 'tmp/complete', LastModified: new Date('2026-08-01T00:00:00.000Z'), Size: 4 },
+          { Key: 'tmp/missing-date', Size: 2 },
+        ],
+        IsTruncated: true,
+        NextContinuationToken: 'next-page',
+      })
+      .mockResolvedValueOnce({});
+    const store = new ImmutableArtifactStore(config, () => ({ destroy: vi.fn(), send }));
+
+    await expect(store.list('tmp/', 'previous-page', 25)).resolves.toEqual({
+      continuationToken: 'next-page',
+      objects: [
+        {
+          key: 'tmp/complete',
+          lastModified: new Date('2026-08-01T00:00:00.000Z'),
+          sizeBytes: 4,
+        },
+      ],
+    });
+    await store.delete('tmp/complete');
+    expect(send.mock.calls[0]?.[0]).toBeInstanceOf(ListObjectsV2Command);
+    expect(send.mock.calls[1]?.[0]).toBeInstanceOf(DeleteObjectCommand);
   });
 });

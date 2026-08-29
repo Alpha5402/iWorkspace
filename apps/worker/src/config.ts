@@ -2,6 +2,17 @@ import { z } from 'zod';
 
 const WorkerConfigSchema = z.object({
   DATABASE_URL: z.url(),
+  ARTIFACT_GC_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .default(15 * 60 * 1_000),
+  ARTIFACT_GC_MAX_OBJECTS: z.coerce.number().int().min(1).max(100_000).default(5_000),
+  ARTIFACT_GC_MINIMUM_AGE_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(24 * 60 * 60 * 1_000),
   LOG_LEVEL: z.string().min(1).default('info'),
   M1_ENABLED: z.enum(['true', 'false']).default('false'),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url(),
@@ -29,6 +40,11 @@ export type WorkerConfig = Readonly<{
   healthPort: number;
   logLevel: string;
   m1?: Readonly<{
+    artifactGarbageCollection: Readonly<{
+      intervalMilliseconds: number;
+      maximumObjectsPerSweep: number;
+      minimumAgeMilliseconds: number;
+    }>;
     deepSeekApiKey: string;
     detailsBaseUrl: string;
     emailOutboxKey: Readonly<{ key: Buffer; version: number }>;
@@ -54,6 +70,11 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv): WorkerConfig {
     config.M1_ENABLED === 'false'
       ? undefined
       : {
+          artifactGarbageCollection: {
+            intervalMilliseconds: config.ARTIFACT_GC_INTERVAL_MS,
+            maximumObjectsPerSweep: config.ARTIFACT_GC_MAX_OBJECTS,
+            minimumAgeMilliseconds: config.ARTIFACT_GC_MINIMUM_AGE_MS,
+          },
           deepSeekApiKey: requireM1Value(config.DEEPSEEK_API_KEY, 'DEEPSEEK_API_KEY'),
           detailsBaseUrl: requireM1Value(config.WEB_ORIGIN, 'WEB_ORIGIN'),
           emailOutboxKey: {

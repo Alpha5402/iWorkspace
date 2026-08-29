@@ -4,6 +4,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -73,6 +74,7 @@ type ArtifactStorageClient = Readonly<{
       | DeleteObjectCommand
       | GetObjectCommand
       | HeadObjectCommand
+      | ListObjectsV2Command
       | PutObjectCommand,
   ): Promise<unknown>;
 }>;
@@ -153,6 +155,45 @@ export class ImmutableArtifactStore {
     )) as Readonly<{ Body?: Readonly<{ transformToByteArray(): Promise<Uint8Array> }> }>;
     if (result.Body === undefined) throw new Error('ARTIFACT_BODY_MISSING');
     return Buffer.from(await result.Body.transformToByteArray());
+  }
+
+  public async list(
+    prefix: 'artifacts/' | 'tmp/',
+    continuationToken?: string,
+    maximumKeys = 500,
+  ): Promise<
+    Readonly<{
+      continuationToken?: string;
+      objects: readonly Readonly<{ key: string; lastModified: Date; sizeBytes: number }>[];
+    }>
+  > {
+    const result = (await this.client.send(
+      new ListObjectsV2Command({
+        Bucket: this.config.bucket,
+        ...(continuationToken === undefined ? {} : { ContinuationToken: continuationToken }),
+        MaxKeys: maximumKeys,
+        Prefix: prefix,
+      }),
+    )) as Readonly<{
+      Contents?: readonly Readonly<{ Key?: string; LastModified?: Date; Size?: number }>[];
+      IsTruncated?: boolean;
+      NextContinuationToken?: string;
+    }>;
+    const objects = (result.Contents ?? []).flatMap((object) =>
+      object.Key === undefined || object.LastModified === undefined
+        ? []
+        : [{ key: object.Key, lastModified: object.LastModified, sizeBytes: object.Size ?? 0 }],
+    );
+    return {
+      ...(result.IsTruncated === true && result.NextContinuationToken !== undefined
+        ? { continuationToken: result.NextContinuationToken }
+        : {}),
+      objects,
+    };
+  }
+
+  public async delete(objectKey: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.config.bucket, Key: objectKey }));
   }
 
   public close(): void {

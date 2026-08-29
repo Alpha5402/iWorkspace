@@ -47,6 +47,11 @@ describe('Worker configuration', () => {
         WEB_ORIGIN: 'https://web.example.test',
       }).m1,
     ).toEqual({
+      artifactGarbageCollection: {
+        intervalMilliseconds: 900_000,
+        maximumObjectsPerSweep: 5_000,
+        minimumAgeMilliseconds: 86_400_000,
+      },
       deepSeekApiKey: 'deepseek-key',
       detailsBaseUrl: 'https://web.example.test',
       emailOutboxKey: { key: Buffer.alloc(32, 8), version: 2 },
