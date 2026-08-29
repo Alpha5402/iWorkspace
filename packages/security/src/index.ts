@@ -22,6 +22,44 @@ export const projectTokenScopes = [
 ] as const;
 export type ProjectTokenScope = (typeof projectTokenScopes)[number];
 
+export type UserSessionPrincipal = Readonly<{
+  organizationId: string;
+  sessionId: string;
+  type: 'USER_SESSION';
+  userId: string;
+}>;
+
+export type ProjectTokenPrincipal = Readonly<{
+  organizationId: string;
+  projectId: string;
+  scopes: readonly ProjectTokenScope[];
+  tokenId: string;
+  type: 'PROJECT_TOKEN';
+}>;
+
+export type SystemPrincipal = Readonly<{
+  organizationId: string;
+  systemId: string;
+  type: 'SYSTEM';
+}>;
+
+export type Principal = UserSessionPrincipal | ProjectTokenPrincipal | SystemPrincipal;
+
+export function principalId(principal: Principal): string {
+  switch (principal.type) {
+    case 'USER_SESSION':
+      return principal.sessionId;
+    case 'PROJECT_TOKEN':
+      return principal.tokenId;
+    case 'SYSTEM':
+      return principal.systemId;
+  }
+}
+
+export function principalAuditMetadata(principal: Principal): Readonly<Record<string, string>> {
+  return principal.type === 'USER_SESSION' ? { subjectUserId: principal.userId } : {};
+}
+
 export const organizationRoles = ['OWNER', 'ADMIN', 'MEMBER'] as const;
 export type OrganizationRole = (typeof organizationRoles)[number];
 export const projectRoles = ['MAINTAINER', 'REVIEWER', 'VIEWER'] as const;

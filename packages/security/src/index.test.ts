@@ -10,6 +10,8 @@ import {
   hashPassword,
   hasPermission,
   issueOpaqueToken,
+  principalAuditMetadata,
+  principalId,
   RefreshTokenService,
   validateCsrf,
   verifyOpaqueToken,
@@ -202,6 +204,30 @@ describe('session JWTs', () => {
 });
 
 describe('authorization and csrf', () => {
+  it('derives a stable audit identity from every principal kind', () => {
+    const userSession = {
+      organizationId: 'organization',
+      sessionId: 'session',
+      type: 'USER_SESSION' as const,
+      userId: 'user',
+    };
+
+    expect(principalId(userSession)).toBe('session');
+    expect(principalAuditMetadata(userSession)).toEqual({ subjectUserId: 'user' });
+    expect(
+      principalId({
+        organizationId: 'organization',
+        projectId: 'project',
+        scopes: ['review:trigger'],
+        tokenId: 'token',
+        type: 'PROJECT_TOKEN',
+      }),
+    ).toBe('token');
+    expect(
+      principalId({ organizationId: 'organization', systemId: 'worker', type: 'SYSTEM' }),
+    ).toBe('worker');
+  });
+
   it('keeps project management with maintainers and organization admins', () => {
     expect(
       hasPermission({

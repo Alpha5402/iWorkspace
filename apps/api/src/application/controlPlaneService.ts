@@ -7,6 +7,7 @@ import {
   withTenant,
 } from '@delivery/database';
 import {
+  ProjectTokenScopeSchema,
   RuleDefinitionSchema,
   type ProjectTokenScope,
   type ReviewTrigger,
@@ -16,13 +17,17 @@ import {
   encryptSecret,
   hasPermission,
   issueOpaqueToken,
+  principalAuditMetadata,
+  principalId,
   verifyOpaqueToken,
   type Permission,
   type ProjectRole,
+  type ProjectTokenPrincipal,
+  type SystemPrincipal,
+  type UserSessionPrincipal,
 } from '@delivery/security';
 
 import { HttpError } from '../errors.js';
-import { type UserActor } from './authService.js';
 
 function canonicalize(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`;
@@ -46,20 +51,6 @@ const TASK_EVENT_TYPE: Readonly<Record<string, string>> = {
   VERIFY_FINDINGS: 'review.verify.requested',
 };
 
-export type ProjectTokenActor = Readonly<{
-  organizationId: string;
-  projectId: string;
-  scopes: readonly string[];
-  tokenId: string;
-  type: 'PROJECT_TOKEN';
-}>;
-
-type SystemActor = Readonly<{
-  organizationId: string;
-  systemId: string;
-  type: 'SYSTEM';
-}>;
-
 export class ControlPlaneService {
   public constructor(
     private readonly database: DeliveryDatabase,
@@ -67,7 +58,7 @@ export class ControlPlaneService {
     private readonly keyEncryptionKey?: Buffer,
   ) {}
 
-  public async listProjects(actor: UserActor): Promise<
+  public async listProjects(actor: UserSessionPrincipal): Promise<
     readonly Readonly<{
       id: string;
       name: string;
@@ -91,7 +82,7 @@ export class ControlPlaneService {
   }
 
   public async createProject(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     input: Readonly<{ name: string; slug: string }>,
     traceId: string,
   ): Promise<Readonly<{ id: string; name: string; slug: string }>> {
@@ -130,7 +121,7 @@ export class ControlPlaneService {
   }
 
   public async createInvitation(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     input: Readonly<{ email: string; role: 'OWNER' | 'ADMIN' | 'MEMBER' }>,
     traceId: string,
   ): Promise<Readonly<{ expiresAt: string; token: string }>> {
@@ -166,7 +157,7 @@ export class ControlPlaneService {
     });
   }
 
-  public async listOrganizationMembers(actor: UserActor): Promise<readonly unknown[]> {
+  public async listOrganizationMembers(actor: UserSessionPrincipal): Promise<readonly unknown[]> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
       await this.assertOrganizationPermission(transaction, actor, 'organization:manage');
       return transaction
@@ -185,7 +176,7 @@ export class ControlPlaneService {
   }
 
   public async removeOrganizationMember(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     userId: string,
     traceId: string,
   ): Promise<void> {
@@ -233,7 +224,7 @@ export class ControlPlaneService {
   }
 
   public async listProjectMembers(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
   ): Promise<readonly unknown[]> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
@@ -254,7 +245,7 @@ export class ControlPlaneService {
   }
 
   public async setProjectMember(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     userId: string,
     role: ProjectRole,
@@ -299,7 +290,7 @@ export class ControlPlaneService {
   }
 
   public async removeProjectMember(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     userId: string,
     traceId: string,
@@ -326,7 +317,7 @@ export class ControlPlaneService {
   }
 
   public async createProjectToken(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     input: Readonly<{
       expiresAt?: string | undefined;
@@ -387,7 +378,10 @@ export class ControlPlaneService {
     });
   }
 
-  public async listProjectTokens(actor: UserActor, projectId: string): Promise<readonly unknown[]> {
+  public async listProjectTokens(
+    actor: UserSessionPrincipal,
+    projectId: string,
+  ): Promise<readonly unknown[]> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
       await this.assertProjectPermission(transaction, actor, projectId, 'project:manage');
       return transaction
@@ -408,7 +402,7 @@ export class ControlPlaneService {
   }
 
   public async createProjectSecret(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     input: Readonly<{ name: string; value: string }>,
     traceId: string,
@@ -454,7 +448,7 @@ export class ControlPlaneService {
   }
 
   public async listProjectSecrets(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
   ): Promise<readonly unknown[]> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
@@ -474,7 +468,7 @@ export class ControlPlaneService {
   }
 
   public async rotateProjectSecret(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     secretId: string,
     value: string,
@@ -554,7 +548,7 @@ export class ControlPlaneService {
   }
 
   public async revokeProjectToken(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     tokenId: string,
     traceId: string,
@@ -586,7 +580,7 @@ export class ControlPlaneService {
     projectId: string,
     token: string,
     requiredScope: ProjectTokenScope,
-  ): Promise<ProjectTokenActor> {
+  ): Promise<ProjectTokenPrincipal> {
     const tokenId = /^iwpat-([0-9a-f-]{36})_/.exec(token)?.[1];
     if (tokenId === undefined)
       throw new HttpError(401, 'INVALID_PROJECT_TOKEN', 'Project token is invalid.');
@@ -616,14 +610,14 @@ export class ControlPlaneService {
     return {
       organizationId: record.organization_id,
       projectId: record.project_id,
-      scopes: record.scopes,
+      scopes: ProjectTokenScopeSchema.array().parse(record.scopes),
       tokenId: record.id,
       type: 'PROJECT_TOKEN',
     };
   }
 
   public async createRuleset(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     input: Readonly<{ name: string; rules: readonly unknown[] }>,
     traceId: string,
@@ -670,7 +664,7 @@ export class ControlPlaneService {
   }
 
   public async publishRuleset(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     versionId: string,
     traceId: string,
@@ -709,7 +703,7 @@ export class ControlPlaneService {
   }
 
   public async updateRulesetDraft(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     versionId: string,
     input: Readonly<{ rules: readonly unknown[] }>,
@@ -748,7 +742,7 @@ export class ControlPlaneService {
   }
 
   public async createRulesetVersion(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     rulesetId: string,
     input: Readonly<{ rules: readonly unknown[] }>,
@@ -810,7 +804,7 @@ export class ControlPlaneService {
   }
 
   public async setDefaultRulesetVersion(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     versionId: string,
     traceId: string,
@@ -848,7 +842,10 @@ export class ControlPlaneService {
     });
   }
 
-  public async listRulesets(actor: UserActor, projectId: string): Promise<readonly unknown[]> {
+  public async listRulesets(
+    actor: UserSessionPrincipal,
+    projectId: string,
+  ): Promise<readonly unknown[]> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
       await this.assertProjectPermission(transaction, actor, projectId, 'review:read');
       return transaction
@@ -871,7 +868,7 @@ export class ControlPlaneService {
   }
 
   public async createRepositoryConnection(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     input: Readonly<{
       installationId: string;
@@ -912,7 +909,7 @@ export class ControlPlaneService {
   }
 
   public async listRepositoryConnections(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
   ): Promise<readonly unknown[]> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
@@ -934,7 +931,7 @@ export class ControlPlaneService {
   }
 
   public async disconnectRepositoryConnection(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     connectionId: string,
     traceId: string,
@@ -974,20 +971,23 @@ export class ControlPlaneService {
     });
   }
 
-  public async assertProjectManageAccess(actor: UserActor, projectId: string): Promise<void> {
+  public async assertProjectManageAccess(
+    actor: UserSessionPrincipal,
+    projectId: string,
+  ): Promise<void> {
     await withTenant(this.database, actor.organizationId, (transaction) =>
       this.assertProjectPermission(transaction, actor, projectId, 'project:manage'),
     );
   }
 
   public async triggerReview(
-    actor: UserActor | ProjectTokenActor,
+    actor: UserSessionPrincipal | ProjectTokenPrincipal,
     projectId: string,
     trigger: ReviewTrigger,
     idempotencyKey: string,
     traceId: string,
   ): Promise<Readonly<{ runId: string; status: 'ACCEPTED' }>> {
-    if (actor.type === 'USER') {
+    if (actor.type === 'USER_SESSION') {
       return withTenant(this.database, actor.organizationId, async (transaction) => {
         await this.assertProjectPermission(transaction, actor, projectId, 'review:trigger');
         return this.insertAcceptedReview(
@@ -1012,7 +1012,10 @@ export class ControlPlaneService {
     );
   }
 
-  public async listReviews(actor: UserActor, projectId: string): Promise<readonly unknown[]> {
+  public async listReviews(
+    actor: UserSessionPrincipal,
+    projectId: string,
+  ): Promise<readonly unknown[]> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
       await this.assertProjectPermission(transaction, actor, projectId, 'review:read');
       return transaction
@@ -1032,7 +1035,10 @@ export class ControlPlaneService {
     });
   }
 
-  public async listFailedTasks(actor: UserActor, projectId: string): Promise<readonly unknown[]> {
+  public async listFailedTasks(
+    actor: UserSessionPrincipal,
+    projectId: string,
+  ): Promise<readonly unknown[]> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
       await this.assertProjectPermission(transaction, actor, projectId, 'project:manage');
       return transaction
@@ -1053,7 +1059,7 @@ export class ControlPlaneService {
   }
 
   public async replayFailedTask(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     taskId: string,
     traceId: string,
@@ -1108,7 +1114,7 @@ export class ControlPlaneService {
   }
 
   public async listUnknownExternalEffects(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
   ): Promise<readonly unknown[]> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
@@ -1132,7 +1138,7 @@ export class ControlPlaneService {
   }
 
   public async getReview(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     runId: string,
   ): Promise<Readonly<Record<string, unknown>>> {
     return withTenant(this.database, actor.organizationId, async (transaction) => {
@@ -1149,7 +1155,10 @@ export class ControlPlaneService {
     });
   }
 
-  public async listFindings(actor: UserActor, runId: string): Promise<readonly unknown[]> {
+  public async listFindings(
+    actor: UserSessionPrincipal,
+    runId: string,
+  ): Promise<readonly unknown[]> {
     const review = await this.getReview(actor, runId);
     const projectId = String(review.project_id);
     return withTenant(this.database, actor.organizationId, (transaction) =>
@@ -1164,7 +1173,10 @@ export class ControlPlaneService {
     );
   }
 
-  public async listArtifacts(actor: UserActor, runId: string): Promise<readonly unknown[]> {
+  public async listArtifacts(
+    actor: UserSessionPrincipal,
+    runId: string,
+  ): Promise<readonly unknown[]> {
     const review = await this.getReview(actor, runId);
     const projectId = String(review.project_id);
     return withTenant(this.database, actor.organizationId, (transaction) =>
@@ -1187,7 +1199,7 @@ export class ControlPlaneService {
   }
 
   public async getArtifactForDownload(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     artifactId: string,
   ): Promise<
     Readonly<{
@@ -1220,7 +1232,7 @@ export class ControlPlaneService {
   }
 
   public async listRunEvents(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     runId: string,
     afterId: number,
   ): Promise<readonly unknown[]> {
@@ -1342,7 +1354,7 @@ export class ControlPlaneService {
         return { duplicate: false, runId: existingRun.id };
       }
       const candidateRunId = randomUUID();
-      const actor: SystemActor = {
+      const actor: SystemPrincipal = {
         organizationId: repository.organization_id,
         systemId: 'github-webhook',
         type: 'SYSTEM',
@@ -1444,7 +1456,7 @@ export class ControlPlaneService {
 
   private async insertAcceptedReview(
     transaction: DeliveryTransaction,
-    actor: UserActor | ProjectTokenActor,
+    actor: UserSessionPrincipal | ProjectTokenPrincipal,
     projectId: string,
     trigger: ReviewTrigger,
     idempotencyKey: string,
@@ -1584,7 +1596,7 @@ export class ControlPlaneService {
 
   private async assertOrganizationPermission(
     transaction: DeliveryTransaction,
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     permission: Permission,
   ): Promise<void> {
     const membership = await transaction
@@ -1607,7 +1619,7 @@ export class ControlPlaneService {
 
   private async assertProjectPermission(
     transaction: DeliveryTransaction,
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     projectId: string,
     permission: Permission,
   ): Promise<void> {
@@ -1640,7 +1652,7 @@ export class ControlPlaneService {
 
   private async audit(
     transaction: DeliveryTransaction,
-    actor: UserActor | ProjectTokenActor | SystemActor,
+    actor: UserSessionPrincipal | ProjectTokenPrincipal | SystemPrincipal,
     action: string,
     targetType: string,
     targetId: string,
@@ -1652,14 +1664,9 @@ export class ControlPlaneService {
       .insertInto('audit_events')
       .values({
         action,
-        actor_id:
-          actor.type === 'USER'
-            ? actor.userId
-            : actor.type === 'PROJECT_TOKEN'
-              ? actor.tokenId
-              : actor.systemId,
+        actor_id: principalId(actor),
         actor_type: actor.type,
-        metadata,
+        metadata: { ...principalAuditMetadata(actor), ...metadata },
         organization_id: actor.organizationId,
         project_id: projectId,
         target_id: targetId,

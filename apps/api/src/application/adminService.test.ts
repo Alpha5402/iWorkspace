@@ -1,11 +1,16 @@
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 
-import { hashPassword, AccessTokenService, RefreshTokenService } from '@delivery/security';
+import {
+  hashPassword,
+  AccessTokenService,
+  RefreshTokenService,
+  type UserSessionPrincipal,
+} from '@delivery/security';
 import { createMemoryDatabase } from '@delivery/testkit';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AdminService } from './adminService.js';
-import { AuthService, bootstrapFirstAdmin, type UserActor } from './authService.js';
+import { AuthService, bootstrapFirstAdmin } from './authService.js';
 import { PublicAuthRateLimiter } from './publicAuthRateLimiter.js';
 
 const PEPPER = 'admin-service-test-pepper-with-enough-entropy';
@@ -14,7 +19,7 @@ describe('AdminService', () => {
   let admin: AdminService;
   let auth: AuthService;
   let database: Awaited<ReturnType<typeof createMemoryDatabase>>;
-  let superActor: UserActor;
+  let superActor: UserSessionPrincipal;
 
   beforeEach(async () => {
     database = await createMemoryDatabase();
@@ -183,6 +188,7 @@ describe('AdminService', () => {
       metadata: {
         fromStatus: 'ACTIVE',
         reason: 'Abuse investigation',
+        subjectUserId: administratorActor.userId,
         toStatus: 'SUSPENDED',
       },
       target_id: ordinary.userId,
@@ -258,10 +264,10 @@ describe('AdminService', () => {
       ipAddress: '192.0.2.45',
       password: 'another secure password',
     });
-    const ordinaryActor: UserActor = {
+    const ordinaryActor: UserSessionPrincipal = {
       organizationId: ordinaryActorUser.organizationId,
       sessionId: randomUUID(),
-      type: 'USER',
+      type: 'USER_SESSION',
       userId: ordinaryActorUser.userId,
     };
 

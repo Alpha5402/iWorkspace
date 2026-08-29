@@ -7,20 +7,17 @@ import {
 } from '@delivery/contracts';
 import { type GitHubAppProvider, verifyGitHubWebhookSignature } from '@delivery/providers-github';
 import { type ImmutableArtifactStore } from '@delivery/object-storage';
-import { validateCsrf } from '@delivery/security';
+import {
+  validateCsrf,
+  type ProjectTokenPrincipal,
+  type UserSessionPrincipal,
+} from '@delivery/security';
 import { type NextFunction, type Request, type Response, Router } from 'express';
 import { z } from 'zod';
 
-import {
-  type AuthService,
-  type SessionBundle,
-  type UserActor,
-} from '../application/authService.js';
+import { type AuthService, type SessionBundle } from '../application/authService.js';
 import { type AdminService } from '../application/adminService.js';
-import {
-  type ControlPlaneService,
-  type ProjectTokenActor,
-} from '../application/controlPlaneService.js';
+import { type ControlPlaneService } from '../application/controlPlaneService.js';
 import { type RegistrationService } from '../application/registrationService.js';
 import { HttpError } from '../errors.js';
 import { getResponseTraceId } from '../middleware/requestContext.js';
@@ -221,7 +218,7 @@ function clearSessionCookies(response: Response, secure: boolean): void {
   response.clearCookie('iw_csrf', { httpOnly: false, sameSite: 'lax', secure });
 }
 
-async function requireUser(request: Request, runtime: M1Runtime): Promise<UserActor> {
+async function requireUser(request: Request, runtime: M1Runtime): Promise<UserSessionPrincipal> {
   const token = parseCookies(request).iw_access;
   if (token === undefined)
     throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Authentication is required.');
@@ -249,7 +246,7 @@ async function resolveReviewActor(
   request: Request,
   runtime: M1Runtime,
   projectId: string,
-): Promise<UserActor | ProjectTokenActor> {
+): Promise<UserSessionPrincipal | ProjectTokenPrincipal> {
   const authorization = request.header('authorization');
   if (authorization?.startsWith('Bearer ') === true) {
     return runtime.controlPlane.authenticateProjectToken(

@@ -11,19 +11,15 @@ import {
   hashPassword,
   type RefreshTokenClaims,
   type RefreshTokenService,
+  principalAuditMetadata,
+  principalId,
+  type UserSessionPrincipal,
   verifyPassword,
 } from '@delivery/security';
 
 import { HttpError } from '../errors.js';
 import { type PublicAuthRateLimiter } from './publicAuthRateLimiter.js';
 import { summarizeSessionFamilies, type SessionSummary } from './sessionSummaries.js';
-
-export type UserActor = Readonly<{
-  organizationId: string;
-  sessionId: string;
-  type: 'USER';
-  userId: string;
-}>;
 
 export type SessionBundle = Readonly<{
   accessToken: string;
@@ -232,7 +228,7 @@ export class AuthService {
     return result;
   }
 
-  public async logout(actor: UserActor): Promise<void> {
+  public async logout(actor: UserSessionPrincipal): Promise<void> {
     const session = await this.database
       .selectFrom('refresh_sessions')
       .select('family_id')
@@ -248,7 +244,7 @@ export class AuthService {
       .execute();
   }
 
-  public async listOrganizations(actor: UserActor): Promise<
+  public async listOrganizations(actor: UserSessionPrincipal): Promise<
     readonly Readonly<{
       current: boolean;
       id: string;
@@ -277,7 +273,7 @@ export class AuthService {
   }
 
   public async switchOrganization(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     organizationId: string,
     metadata: SessionMetadata,
   ): Promise<SessionBundle> {
@@ -329,7 +325,7 @@ export class AuthService {
     });
   }
 
-  public async listSessions(actor: UserActor): Promise<readonly SessionSummary[]> {
+  public async listSessions(actor: UserSessionPrincipal): Promise<readonly SessionSummary[]> {
     const [rows, databaseNow] = await Promise.all([
       this.database
         .selectFrom('refresh_sessions')
@@ -356,7 +352,7 @@ export class AuthService {
   }
 
   public async revokeSession(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     sessionId: string,
   ): Promise<Readonly<{ currentSessionRevoked: boolean }>> {
     return this.database.transaction().execute(async (transaction) => {
@@ -387,7 +383,7 @@ export class AuthService {
   }
 
   public async logoutOtherSessions(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
   ): Promise<Readonly<{ revokedFamilies: number }>> {
     return this.database.transaction().execute(async (transaction) => {
       const current = await transaction
@@ -420,7 +416,9 @@ export class AuthService {
     });
   }
 
-  public async logoutAllSessions(actor: UserActor): Promise<Readonly<{ revokedFamilies: number }>> {
+  public async logoutAllSessions(
+    actor: UserSessionPrincipal,
+  ): Promise<Readonly<{ revokedFamilies: number }>> {
     return this.database.transaction().execute(async (transaction) => {
       const families = await transaction
         .selectFrom('refresh_sessions')
@@ -442,7 +440,7 @@ export class AuthService {
   }
 
   public async changePassword(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     input: Readonly<{ currentPassword: string; newPassword: string }>,
     traceId: string,
   ): Promise<Readonly<{ revokedFamilies: number }>> {
@@ -506,9 +504,12 @@ export class AuthService {
         .insertInto('audit_events')
         .values({
           action: 'identity.password.changed',
-          actor_id: actor.userId,
-          actor_type: 'USER',
-          metadata: { revokedFamilies: families.length },
+          actor_id: principalId(actor),
+          actor_type: actor.type,
+          metadata: {
+            ...principalAuditMetadata(actor),
+            revokedFamilies: families.length,
+          },
           organization_id: actor.organizationId,
           project_id: null,
           target_id: actor.userId,
@@ -583,7 +584,7 @@ export class AuthService {
     });
   }
 
-  public async verifyAccessToken(token: string): Promise<UserActor> {
+  public async verifyAccessToken(token: string): Promise<UserSessionPrincipal> {
     const claims = await this.accessTokens.verify(token);
     const activeSession = await this.database
       .selectFrom('refresh_sessions')
@@ -607,7 +608,7 @@ export class AuthService {
     return {
       organizationId: claims.organizationId,
       sessionId: claims.sessionId,
-      type: 'USER' as const,
+      type: 'USER_SESSION' as const,
       userId: claims.sub,
     };
   }

@@ -289,7 +289,7 @@ export interface ConsumerInboxTable {
 export interface AuditEventsTable {
   action: string;
   actor_id: string;
-  actor_type: 'USER' | 'PROJECT_TOKEN' | 'SYSTEM';
+  actor_type: 'USER_SESSION' | 'PROJECT_TOKEN' | 'SYSTEM';
   id: Generated<number>;
   metadata: JsonObject;
   occurred_at: Generated<Timestamp>;

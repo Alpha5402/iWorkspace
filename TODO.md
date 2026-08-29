@@ -1,6 +1,6 @@
 # AI Delivery Control Plane 总体 TODO
 
-> 状态：M0 已完成。M1 原邀请制主闭环与 L2 自动化验证已完成；公开注册、邮箱验证、个人 Organization、PostgreSQL 限流、JWT 双 Token、平台管理员后台、组织切换、设备会话、密码变更撤销与非敏感 Token 元数据的 L2 已落地。身份 Principal 统一、Artifact GC、Ruleset 版本编辑、容量基线、真实 GitHub/DeepSeek、进程故障接管和 Dogfooding Proof Bundle（L3）仍待完成。M2、M3 未开始。
+> 状态：M0 已完成。M1 原邀请制主闭环与 L2 自动化验证已完成；公开注册、邮箱验证、个人 Organization、PostgreSQL 限流、JWT 双 Token、平台管理员后台、组织切换、设备会话、密码变更撤销、非敏感 Token 元数据、统一 Principal、Artifact GC 与 Ruleset 版本编辑的 L2 已落地。容量基线、真实 GitHub/DeepSeek、进程故障接管和 Dogfooding Proof Bundle（L3）仍待完成。M2、M3 未开始。
 
 ## 0. 项目目标与阶段顺序
 
@@ -295,8 +295,8 @@ infra/
 - [x] 平台角色固定为 `SUPER_ADMIN / ADMIN / USER`，与组织角色 `OWNER / ADMIN / MEMBER`、项目角色 `MAINTAINER / REVIEWER / VIEWER` 相互独立，禁止根据名称相同隐式继承权限。
 - [x] 首位 `SUPER_ADMIN` 仍由可信 CLI 创建；只有 `SUPER_ADMIN` 可以授予或撤销平台 `ADMIN`，并保护最后一个 `SUPER_ADMIN` 不被停用、降级或删除。
 - [x] 平台 `ADMIN` 可以查询和管理全站普通用户、会话与账户状态，但不因平台角色自动获得任意租户项目数据访问权；进入租户业务仍需显式 Membership。
-- [ ] 统一 Principal 类型为 `USER_SESSION / PROJECT_TOKEN / SYSTEM`；所有权限决策和 Audit Event 必须记录 Principal 类型与稳定 ID。
-- [ ] 保留项目 Access Token 作为项目级机器身份，通过 `project_id + scopes + token_id` 鉴权；`created_by` 只表达创建者和审计血缘，不把机器 Token 伪装成创建它的用户。
+- [x] 统一 Principal 类型为 `USER_SESSION / PROJECT_TOKEN / SYSTEM`；类型由 Security 包集中定义，Audit Event 分别使用 `sessionId / tokenId / systemId` 作为稳定 ID。用户会话另以 `subjectUserId` 保留用户归属；旧 `USER` 审计记录迁移为带显式 legacy 标记的合成稳定 ID，不伪造已经无法恢复的历史 Session ID。
+- [x] 保留项目 Access Token 作为项目级机器身份，通过 `project_id + scopes + token_id` 鉴权；`created_by` 只表达创建者和审计血缘，Review Trigger 的 Audit Event 记录 Token Principal 本身，不把机器 Token 伪装成创建它的用户。
 
 #### JWT 双 Token 与会话安全
 

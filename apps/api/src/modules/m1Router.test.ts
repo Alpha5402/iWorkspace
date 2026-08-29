@@ -2,13 +2,13 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 
 import { ErrorResponseSchema } from '@delivery/contracts';
 import { createLogger } from '@delivery/observability';
+import { type UserSessionPrincipal } from '@delivery/security';
 import { type Express } from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { createApp } from '../app.js';
-import { type UserActor } from '../application/authService.js';
 import { type M1Runtime } from './m1Router.js';
 
 const WEB_ORIGIN = 'https://web.example.test';
@@ -25,10 +25,10 @@ const versionId = randomUUID();
 const rulesetId = randomUUID();
 const taskId = randomUUID();
 
-const actor: UserActor = {
+const actor: UserSessionPrincipal = {
   organizationId,
   sessionId: randomUUID(),
-  type: 'USER',
+  type: 'USER_SESSION',
   userId,
 };
 

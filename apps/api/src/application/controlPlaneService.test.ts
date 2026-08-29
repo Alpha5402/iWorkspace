@@ -1,10 +1,14 @@
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 
-import { AccessTokenService, RefreshTokenService } from '@delivery/security';
+import {
+  AccessTokenService,
+  RefreshTokenService,
+  type UserSessionPrincipal,
+} from '@delivery/security';
 import { createMemoryDatabase } from '@delivery/testkit';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { AuthService, bootstrapFirstAdmin, type UserActor } from './authService.js';
+import { AuthService, bootstrapFirstAdmin } from './authService.js';
 import { ControlPlaneService } from './controlPlaneService.js';
 import { PublicAuthRateLimiter } from './publicAuthRateLimiter.js';
 
@@ -52,7 +56,7 @@ const rule = {
 };
 
 describe('ControlPlaneService', () => {
-  let actor: UserActor;
+  let actor: UserSessionPrincipal;
   let auth: AuthService;
   let control: ControlPlaneService;
   let database: Awaited<ReturnType<typeof createMemoryDatabase>>;
@@ -147,6 +151,17 @@ describe('ControlPlaneService', () => {
         { action: 'invitation.created', trace_id: 'trace-member' },
       ]),
     );
+    await expect(
+      database
+        .selectFrom('audit_events')
+        .select(['actor_id', 'actor_type', 'metadata'])
+        .where('action', '=', 'project.created')
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({
+      actor_id: actor.sessionId,
+      actor_type: 'USER_SESSION',
+      metadata: { subjectUserId: actor.userId },
+    });
   });
 
   it('shows a project token once, authenticates its scope, and revokes it', async () => {
@@ -162,12 +177,59 @@ describe('ControlPlaneService', () => {
     const listed = await control.listProjectTokens(actor, project.id);
     expect(listed).toHaveLength(1);
     expect(JSON.stringify(listed)).not.toContain(issued.token);
-    await expect(
-      control.authenticateProjectToken(project.id, issued.token, 'review:trigger'),
-    ).resolves.toMatchObject({ projectId: project.id, tokenId: issued.id, type: 'PROJECT_TOKEN' });
+    const tokenPrincipal = await control.authenticateProjectToken(
+      project.id,
+      issued.token,
+      'review:trigger',
+    );
+    expect(tokenPrincipal).toMatchObject({
+      projectId: project.id,
+      tokenId: issued.id,
+      type: 'PROJECT_TOKEN',
+    });
     await expect(
       control.authenticateProjectToken(project.id, issued.token, 'artifact:read'),
     ).rejects.toMatchObject({ code: 'INVALID_PROJECT_TOKEN' });
+    const ruleset = await control.createRuleset(
+      actor,
+      project.id,
+      { name: 'Token review', rules: [rule] },
+      'trace-ruleset',
+    );
+    await control.publishRuleset(actor, project.id, ruleset.versionId, 'trace-publish');
+    const repository = await control.createRepositoryConnection(
+      actor,
+      project.id,
+      {
+        installationId: '101',
+        owner: 'example',
+        permissions: {},
+        repositoryId: '202',
+        repositoryName: 'repo',
+      },
+      'trace-repository',
+    );
+    await control.triggerReview(
+      tokenPrincipal,
+      project.id,
+      {
+        source: {
+          pullRequestNumber: 5,
+          repositoryConnectionId: repository.id,
+          type: 'github_pull_request',
+        },
+      },
+      'token-review-request',
+      'trace-token-review',
+    );
+    await expect(
+      database
+        .selectFrom('audit_events')
+        .select(['actor_id', 'actor_type', 'metadata'])
+        .where('action', '=', 'review.accepted')
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ actor_id: issued.id, actor_type: 'PROJECT_TOKEN', metadata: {} });
+
     await control.revokeProjectToken(actor, project.id, issued.id, 'trace-revoke');
     await expect(
       control.authenticateProjectToken(project.id, issued.token, 'review:trigger'),
@@ -356,6 +418,19 @@ describe('ControlPlaneService', () => {
     await expect(database.selectFrom('review_runs').select('id').execute()).resolves.toHaveLength(
       1,
     );
+    await expect(
+      database
+        .selectFrom('audit_events')
+        .select(['actor_id', 'actor_type', 'metadata'])
+        .where('action', '=', 'review.accepted')
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({
+      actor_id: 'github-webhook',
+      actor_type: 'SYSTEM',
+      metadata: {
+        deliveryId: webhook.deliveryId,
+      },
+    });
   });
 
   it('switches only to published rulesets and disconnects repository bindings idempotently', async () => {

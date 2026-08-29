@@ -4,10 +4,10 @@ import {
   type DeliveryTransaction,
   getDatabaseNow,
 } from '@delivery/database';
+import { principalAuditMetadata, principalId, type UserSessionPrincipal } from '@delivery/security';
 import { z } from 'zod';
 
 import { HttpError } from '../errors.js';
-import { type UserActor } from './authService.js';
 import {
   summarizeSessionFamilies,
   type SessionRow,
@@ -58,7 +58,7 @@ export class AdminService {
   public constructor(private readonly database: DeliveryDatabase) {}
 
   public async listUsers(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     input: Readonly<{
       cursor?: string | undefined;
       email?: string | undefined;
@@ -106,7 +106,7 @@ export class AdminService {
     };
   }
 
-  public async getUser(actor: UserActor, userId: string): Promise<PlatformUserDetail> {
+  public async getUser(actor: UserSessionPrincipal, userId: string): Promise<PlatformUserDetail> {
     await this.assertPlatformAdministrator(this.database, actor);
     const user = await this.database
       .selectFrom('users')
@@ -170,7 +170,7 @@ export class AdminService {
   }
 
   public async setUserStatus(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     userId: string,
     status: 'ACTIVE' | 'SUSPENDED',
     reason: string,
@@ -243,7 +243,7 @@ export class AdminService {
   }
 
   public async setPlatformRole(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     userId: string,
     role: 'ADMIN' | 'USER',
     reason: string,
@@ -301,7 +301,7 @@ export class AdminService {
   }
 
   public async revokeUserSessions(
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     userId: string,
     reason: string,
     traceId: string,
@@ -327,7 +327,7 @@ export class AdminService {
 
   private async assertPlatformAdministrator(
     database: DeliveryDatabase,
-    actor: UserActor,
+    actor: UserSessionPrincipal,
   ): Promise<PlatformRole> {
     const row = await database
       .selectFrom('users')
@@ -350,7 +350,7 @@ export class AdminService {
 
   private async loadMutationActors(
     transaction: DeliveryTransaction,
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     targetUserId: string,
   ): Promise<Readonly<{ actorRole: PlatformRole; target: UserRow }>> {
     const users = await transaction
@@ -402,7 +402,7 @@ export class AdminService {
 
   private async audit(
     transaction: DeliveryTransaction,
-    actor: UserActor,
+    actor: UserSessionPrincipal,
     action: string,
     targetId: string,
     reason: string,
@@ -413,9 +413,9 @@ export class AdminService {
       .insertInto('audit_events')
       .values({
         action,
-        actor_id: actor.userId,
-        actor_type: 'USER',
-        metadata: { ...metadata, reason },
+        actor_id: principalId(actor),
+        actor_type: actor.type,
+        metadata: { ...principalAuditMetadata(actor), ...metadata, reason },
         organization_id: actor.organizationId,
         project_id: null,
         target_id: targetId,

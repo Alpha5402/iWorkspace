@@ -262,6 +262,42 @@ describeInfrastructure('PostgreSQL job reliability and tenant isolation', () => 
     ).resolves.toBeDefined();
   });
 
+  it('accepts only typed principal identities and keeps their audit records immutable', async () => {
+    await expect(
+      database.transaction().execute(async (transaction) => {
+        const audit = await transaction
+          .insertInto('audit_events')
+          .values({
+            action: 'integration.principal.checked',
+            actor_id: randomUUID(),
+            actor_type: 'USER_SESSION',
+            metadata: { subjectUserId: userId },
+            organization_id: organizationId,
+            project_id: projectId,
+            target_id: userId,
+            target_type: 'USER',
+            trace_id: randomUUID(),
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable('audit_events')
+          .set({ action: 'mutated' })
+          .where('id', '=', audit.id)
+          .execute();
+      }),
+    ).rejects.toThrow('audit_events are append-only');
+    await expect(
+      sql`INSERT INTO audit_events (
+        organization_id, project_id, actor_type, actor_id, action,
+        target_type, target_id, trace_id
+      ) VALUES (
+        ${organizationId}, ${projectId}, 'USER', ${randomUUID()}, 'legacy.actor',
+        'USER', ${userId}, ${randomUUID()}
+      )`.execute(database),
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
   async function seedTenant(
     tenantId: string,
     tenantProjectId: string,

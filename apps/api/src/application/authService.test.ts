@@ -87,7 +87,7 @@ describe('AuthService', () => {
     expect(session.user).toMatchObject({ organizationId, organizationRole: 'OWNER' });
     await expect(auth.verifyAccessToken(session.accessToken)).resolves.toMatchObject({
       organizationId,
-      type: 'USER',
+      type: 'USER_SESSION',
       userId: session.user.id,
     });
     const bootstrappedUser = await database
@@ -424,7 +424,7 @@ describe('AuthService', () => {
         .executeTakeFirstOrThrow(),
     ).resolves.toEqual({
       action: 'identity.password.changed',
-      metadata: { revokedFamilies: 2 },
+      metadata: { revokedFamilies: 2, subjectUserId: actor.userId },
     });
   });
 });
