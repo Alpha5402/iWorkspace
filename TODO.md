@@ -336,14 +336,44 @@ infra/
 
 #### 关键决策与 Trade-off
 
-本切片已固定以下实现决策：注册发生在租户创建之前，因此身份邮件使用独立 Outbox，不削弱必须携带租户标识的业务事件 Envelope；验证 Token 摘要与可投递密文分离，密文使用独立版本化 KEK，仅由 Email Worker 在内存解密；过期、租约和限流窗口统一使用 PostgreSQL 时钟；注册与重发对已存在/不存在账户返回相同响应。代价是增加一套小型 Identity Outbox 与部署密钥，但换来事务性邮件意图、可接管投递、稳定幂等和账户枚举防护。
+以下 ADR 是 M1 身份切片的已接受决策，后续实现变更必须先更新对应决策、迁移和验证证据，不能只修改代码行为。
 
-平台管理使用独立的 `iw_platform_admin` 数据库角色和连接池；该角色可绕过租户 RLS，但只获得用户、组织 Membership 与 Session 所需的列级/表级权限，明确不能读取 `projects`。用户状态与角色变更通过全局 Advisory Lock、目标行锁和同事务 Audit Event 串行化。代价是多一个受约束连接池并降低管理员写吞吐，但管理操作低频，换来可证明的跨租户权限边界与“最后一个活跃 SUPER_ADMIN”并发保护。组织切换会撤销旧 Session Family 并签发绑定目标 Organization 的新双 Token，牺牲跨标签页继续使用旧会话的便利，避免租户上下文混用。
+##### ADR-M1-IDENTITY-001：公开注册与可靠验证邮件
 
-- [ ] 记录 ADR：公开注册扩大攻击面并增加 Email Provider、限流和账户枚举防护成本，但换来自助获客与独立用户身份。
-- [ ] 记录 ADR：Refresh Token 虽采用 JWT，仍保持服务端 Session/JTI 状态，因此牺牲“完全无状态”，换取旋转、重放检测、管理员撤销和设备管理能力。
-- [ ] 记录 ADR：平台管理员不自动绕过租户权限，增加一次显式授权检查，但显著缩小后台账号泄露后的数据暴露范围。
-- [ ] 记录 ADR：公开注册用户自动创建个人 Organization，避免没有租户上下文的悬空账户；代价是 Organization 数量会随注册用户增长。
+- **目的**：允许用户自助获得独立身份，同时保持账户激活、邮件意图和验证 Token 的事务一致性。
+- **选择**：注册账户先进入 `PENDING_VERIFICATION`；验证邮件使用独立 Identity Outbox，Token 摘要与可投递密文分离，密文由版本化 KEK 包装且仅在 Email Worker 内存解密。注册、重发和登录限流使用 PostgreSQL 时钟与分布式桶；对已存在和不存在账户返回相同响应。
+- **不选择**：不在 HTTP 响应内同步发送邮件，否则数据库提交与 Provider 结果无法原子协调；M1 不引入 Redis，因为当前没有限流表成为瓶颈的证据；不返回“邮箱已存在”，避免账户枚举。
+- **Trade-off**：扩大公网攻击面，并增加 Email Provider、Outbox、KEK 轮换、限流与清理成本；换来自助获客、可靠投递、稳定幂等和可审计验证链路。
+- **验证**：并发重复注册、Token 重放/过期、分布式限流、Provider 失败重试和日志/数据库无明文测试已通过。
+
+##### ADR-M1-IDENTITY-002：状态化 JWT 双 Token
+
+- **目的**：使用短期 Access JWT 降低每次请求的凭据暴露窗口，同时让长期 Refresh 凭据可轮换、可撤销并可检测重放。
+- **选择**：Access/Refresh 使用不同 `typ`、Audience 和 EdDSA 密钥；Refresh JWT 仍绑定数据库 Session、Family 和 JTI，使用一次即旋转。旧 Token 重放、密码变更、账户停用和管理员操作均可立即撤销 Session Family，服务端授权继续读取当前账户与 Membership 状态。
+- **不选择**：不采用完全无状态的长期 JWT；该方案无法可靠实现单设备撤销、全量退出、旧 Refresh 重放检测和管理员即时停用。也不把可变角色永久固化在 Access JWT 中。
+- **Trade-off**：Refresh 路径增加数据库读取、Session 清理和密钥轮换复杂度，失去“完全无状态”的水平扩容简洁性；换取设备管理、即时撤销和明确的安全事件边界。
+- **验证**：Token 类型/Audience/Key 混淆、旋转、旧 Token 重放、滚动密钥窗口、停用与全部 Session 撤销测试已通过。
+
+##### ADR-M1-IDENTITY-003：平台管理与租户授权分离
+
+- **目的**：管理员能够管理全站身份，但后台凭据泄露时不能自动读取所有租户项目与代码审查数据。
+- **选择**：平台 `SUPER_ADMIN / ADMIN / USER` 与组织/项目角色完全独立；管理查询使用独立 `iw_platform_admin` 数据库角色和连接池。该角色可绕过身份表 RLS，但只获得用户、Membership、Session 和脱敏 Token View 的最小权限，明确没有 `projects` 读取权限。状态与角色写入使用 Advisory Lock、目标行锁和同事务 Audit Event。
+- **不选择**：不让平台管理员隐式成为所有 Organization OWNER，也不复用 Migrator/数据库 Owner 连接；否则一次后台身份泄露会跨越全部租户数据边界。
+- **Trade-off**：增加专用连接池、显式授权检查和低频管理写入的串行化等待；换取可证明的最小权限、“最后一个活跃 SUPER_ADMIN”并发保护与完整审计。
+- **验证**：跨租户项目拒绝、越权提权、并发最后管理员保护、敏感列缺失和 100,000 用户查询计划验证已通过。
+
+##### ADR-M1-IDENTITY-004：验证后创建个人 Organization
+
+- **目的**：确保每个激活账户立即拥有合法租户上下文，避免后续 Access Token、RLS 和项目 API 面对“无 Organization 用户”的特殊状态。
+- **选择**：邮箱验证与个人 Organization、OWNER Membership 在同一事务中创建；Organization 切换时验证 Membership、撤销旧 Session Family，并签发绑定目标 Organization 的新双 Token。
+- **不选择**：不在注册请求时创建 Organization，避免未验证/机器人账户制造孤儿租户；不允许一个 Session 在请求参数中任意切换租户，避免跨标签页和并发请求混用授权上下文。
+- **Trade-off**：Organization 数量随已验证用户增长，切换组织会使旧标签页 Session 失效；换取统一租户模型、清晰 RLS 上下文和更小的授权状态空间。
+- **验证**：验证 Token 幂等、个人 Organization 原子创建、Membership 校验、组织切换和旧 Session Family 撤销测试已通过。
+
+- [x] ADR-M1-IDENTITY-001：公开注册与可靠验证邮件。
+- [x] ADR-M1-IDENTITY-002：状态化 JWT 双 Token。
+- [x] ADR-M1-IDENTITY-003：平台管理与租户授权分离。
+- [x] ADR-M1-IDENTITY-004：验证后创建个人 Organization。
 
 #### 测试与退出条件
 
