@@ -10,6 +10,7 @@
   "scripts": {
     "build": "pnpm -r --sort --if-present build",
     "bootstrap:admin": "pnpm --filter @delivery/api bootstrap:admin",
+    "benchmark:admin-users": "pnpm --filter @delivery/api benchmark:admin-users",
     "benchmark:review-acceptance": "pnpm --filter @delivery/api benchmark:review-acceptance",
     "check:architecture": "depcruise --config dependency-cruiser.cjs apps packages",
     "check:dead-code": "knip",

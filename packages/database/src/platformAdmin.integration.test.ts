@@ -59,4 +59,19 @@ describeInfrastructure('platform administrator database role', () => {
       administratorDatabase.selectFrom('projects').select('id').execute(),
     ).rejects.toThrow(/permission denied/i);
   });
+
+  it('provides the stable ordering index required by bounded user pagination', async () => {
+    const index = await sql<{ indexdef: string }>`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE schemaname = 'public' AND indexname = 'users_admin_created_id_idx'
+    `.execute(database);
+
+    expect(index.rows).toEqual([
+      {
+        indexdef:
+          'CREATE INDEX users_admin_created_id_idx ON public.users USING btree (created_at DESC, id DESC)',
+      },
+    ]);
+  });
 });
