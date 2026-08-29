@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 
 import { type ChannelModel, type ConfirmChannel, type ConsumeMessage } from 'amqplib';
 
@@ -27,10 +28,7 @@ describe('RabbitMQ health probe', () => {
 
   it('declares durable review and dead-letter topology and publishes a complete envelope', async () => {
     const channel = createChannel();
-    const connection = {
-      close: vi.fn().mockResolvedValue(undefined),
-      createConfirmChannel: vi.fn().mockResolvedValue(channel),
-    };
+    const connection = createConnection(channel);
     const bus = await RabbitMqBus.connect('amqp://example', vi.fn().mockResolvedValue(connection));
     expect(channel.assertQueue).toHaveBeenCalledTimes(Object.keys(reviewQueues).length * 2);
     expect(channel.bindQueue).toHaveBeenCalledTimes(Object.keys(reviewQueues).length * 2);
@@ -65,10 +63,7 @@ describe('RabbitMQ health probe', () => {
 
   it('ACKs successful deliveries, NACKs failed deliveries, and ignores consumer cancellation', async () => {
     const channel = createChannel();
-    const connection = {
-      close: vi.fn().mockResolvedValue(undefined),
-      createConfirmChannel: vi.fn().mockResolvedValue(channel),
-    };
+    const connection = createConnection(channel);
     const bus = await RabbitMqBus.connect('amqp://example', () =>
       Promise.resolve(connection as unknown as ChannelModel),
     );
@@ -91,10 +86,55 @@ describe('RabbitMQ health probe', () => {
     callback?.(null);
     expect(handler).toHaveBeenCalledTimes(2);
   });
+
+  it('reconnects, redeclares topology, and restores consumers after broker interruption', async () => {
+    const firstChannel = createChannel();
+    const secondChannel = createChannel();
+    const firstConnection = createConnection(firstChannel);
+    const secondConnection = createConnection(secondChannel);
+    const connector = vi
+      .fn<RabbitMqConnectorForTest>()
+      .mockResolvedValueOnce(firstConnection)
+      .mockResolvedValueOnce(secondConnection);
+    const bus = await RabbitMqBus.connect('amqp://example', connector);
+    const handler = vi.fn<(message: ConsumeMessage) => Promise<void>>().mockResolvedValue();
+    await bus.consume(reviewQueues.acquire, handler);
+
+    firstConnection.emit('close');
+    await bus.publish({
+      correlationId: 'reconnected',
+      eventId: randomUUID(),
+      eventType: 'review.acquire.requested',
+      eventVersion: 1,
+      occurredAt: new Date('2026-08-26T00:00:00.000Z'),
+      organizationId: randomUUID(),
+      payload: {},
+      projectId: randomUUID(),
+    });
+
+    expect(connector).toHaveBeenCalledTimes(2);
+    expect(secondChannel.assertQueue).toHaveBeenCalledTimes(Object.keys(reviewQueues).length * 2);
+    expect(secondChannel.consume).toHaveBeenCalledWith(reviewQueues.acquire, expect.any(Function));
+    expect(secondChannel.publish).toHaveBeenCalledOnce();
+    await bus.close();
+    expect(secondConnection.close).toHaveBeenCalledOnce();
+  });
 });
 
+type RabbitMqConnectorForTest = (url: string) => Promise<ChannelModel>;
+
+function createConnection(channel: ConfirmChannel): ChannelModel & EventEmitter {
+  const connection = new EventEmitter() as ChannelModel & EventEmitter;
+  Object.assign(connection, {
+    close: vi.fn().mockResolvedValue(undefined),
+    createConfirmChannel: vi.fn().mockResolvedValue(channel),
+  });
+  return connection;
+}
+
 function createChannel(): ConfirmChannel {
-  return {
+  const channel = new EventEmitter() as ConfirmChannel & EventEmitter;
+  Object.assign(channel, {
     ack: vi.fn(),
     assertExchange: vi.fn().mockResolvedValue({ exchange: '' }),
     assertQueue: vi.fn().mockResolvedValue({ consumerCount: 0, messageCount: 0, queue: '' }),
@@ -104,5 +144,6 @@ function createChannel(): ConfirmChannel {
     prefetch: vi.fn().mockResolvedValue({}),
     publish: vi.fn().mockReturnValue(true),
     waitForConfirms: vi.fn().mockResolvedValue(undefined),
-  } as unknown as ConfirmChannel;
+  });
+  return channel;
 }

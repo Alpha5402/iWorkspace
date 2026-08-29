@@ -233,6 +233,7 @@ infra/
 - [x] 实现数据库时间 Lease、Heartbeat、Attempt、Fencing Token、Retry Wait、Lease Reaper 和容量租约。
 - [x] Relay 所有权、重复消费、ACK/NACK、旧 Attempt 回写和延迟重试已有自动化测试。
 - [x] 失败任务查询与重放会生成新 Event ID，并保留 causationId。
+- [x] `RabbitMqBus` 在连接/Channel 关闭后使用有界退避重连，重新声明拓扑并恢复已注册消费者；真实重启 RabbitMQ 容器后，同一消费者进程无需重启即可继续发布和消费，演练前后队列均无遗留消息，脱敏证据归档于本地 `.workspace/proofs/`。
 - [ ] 在真实多进程环境执行 Worker 强杀、Broker 中断和 DLQ 人工重放演练。
 
 ### M1-05：Artifact 与 Evidence
