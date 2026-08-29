@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
 
-import { AccessTokenService } from '@delivery/security';
+import { AccessTokenService, hashPassword, RefreshTokenService } from '@delivery/security';
 import { createMemoryDatabase } from '@delivery/testkit';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -9,14 +9,34 @@ import { AuthService, bootstrapFirstAdmin } from './authService.js';
 
 const PEPPER = 'test-only-token-pepper-with-enough-entropy';
 
-function createAccessTokens(): AccessTokenService {
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  return new AccessTokenService(
-    privateKey.export({ format: 'pem', type: 'pkcs8' }),
-    publicKey.export({ format: 'pem', type: 'spki' }),
-    'iworkspace-test',
-    'iworkspace-web',
-  );
+function createTokenServices(): Readonly<{
+  access: AccessTokenService;
+  refresh: RefreshTokenService;
+}> {
+  const accessPair = generateKeyPairSync('ed25519');
+  const refreshPair = generateKeyPairSync('ed25519');
+  const accessKey = {
+    keyId: 'access-test-v1',
+    privateKeyPem: accessPair.privateKey.export({ format: 'pem', type: 'pkcs8' }),
+    publicKeyPem: accessPair.publicKey.export({ format: 'pem', type: 'spki' }),
+  };
+  const refreshKey = {
+    keyId: 'refresh-test-v1',
+    privateKeyPem: refreshPair.privateKey.export({ format: 'pem', type: 'pkcs8' }),
+    publicKeyPem: refreshPair.publicKey.export({ format: 'pem', type: 'spki' }),
+  };
+  return {
+    access: new AccessTokenService(
+      { current: accessKey, verificationKeys: [accessKey] },
+      'iworkspace-test',
+      'iworkspace-access',
+    ),
+    refresh: new RefreshTokenService(
+      { current: refreshKey, verificationKeys: [refreshKey] },
+      'iworkspace-test',
+      'iworkspace-refresh',
+    ),
+  };
 }
 
 describe('AuthService', () => {
@@ -26,7 +46,8 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     database = await createMemoryDatabase();
-    auth = new AuthService(database, createAccessTokens(), PEPPER);
+    const tokens = createTokenServices();
+    auth = new AuthService(database, tokens.access, tokens.refresh, PEPPER);
     ({ organizationId } = await bootstrapFirstAdmin({
       database,
       email: 'Owner@Example.com',
@@ -50,13 +71,19 @@ describe('AuthService', () => {
       password: 'correct horse battery staple',
     });
 
-    expect(session.refreshToken).toMatch(/^iwrf_/);
+    expect(session.refreshToken.split('.')).toHaveLength(3);
     expect(session.user).toMatchObject({ organizationId, organizationRole: 'OWNER' });
     await expect(auth.verifyAccessToken(session.accessToken)).resolves.toMatchObject({
       organizationId,
       type: 'USER',
       userId: session.user.id,
     });
+    const bootstrappedUser = await database
+      .selectFrom('users')
+      .select(['platform_role', 'status'])
+      .where('id', '=', session.user.id)
+      .executeTakeFirstOrThrow();
+    expect(bootstrappedUser).toEqual({ platform_role: 'SUPER_ADMIN', status: 'ACTIVE' });
   });
 
   it('rotates refresh tokens and commits family revocation when an old token is reused', async () => {
@@ -118,9 +145,55 @@ describe('AuthService', () => {
     });
     const actor = await auth.verifyAccessToken(session.accessToken);
     await auth.logout(actor);
+    await expect(auth.verifyAccessToken(session.accessToken)).rejects.toMatchObject({
+      code: 'ACCESS_SESSION_INACTIVE',
+      status: 401,
+    });
     await auth.logout({ ...actor, sessionId: crypto.randomUUID() });
     await expect(auth.refresh(session.refreshToken)).rejects.toMatchObject({
       code: 'REFRESH_TOKEN_EXPIRED',
+    });
+  });
+
+  it('rejects access and refresh credentials immediately after account suspension', async () => {
+    const session = await auth.login({
+      email: 'owner@example.com',
+      password: 'correct horse battery staple',
+    });
+    await database
+      .updateTable('users')
+      .set({ status: 'SUSPENDED' })
+      .where('id', '=', session.user.id)
+      .executeTakeFirstOrThrow();
+
+    await expect(auth.verifyAccessToken(session.accessToken)).rejects.toMatchObject({
+      code: 'ACCESS_SESSION_INACTIVE',
+    });
+    await expect(auth.refresh(session.refreshToken)).rejects.toMatchObject({
+      code: 'REFRESH_TOKEN_EXPIRED',
+    });
+  });
+
+  it('fails closed when credentials have no tenant membership or are not a valid refresh JWT', async () => {
+    const userWithoutOrganization = await database
+      .insertInto('users')
+      .values({ email: 'orphan@example.com', status: 'ACTIVE' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto('user_password_credentials')
+      .values({
+        password_hash: await hashPassword('another secure password'),
+        user_id: userWithoutOrganization.id,
+      })
+      .executeTakeFirstOrThrow();
+
+    await expect(
+      auth.login({ email: 'orphan@example.com', password: 'another secure password' }),
+    ).rejects.toMatchObject({ code: 'ORGANIZATION_ACCESS_DENIED', status: 403 });
+    await expect(auth.refresh('not-a-jwt')).rejects.toMatchObject({
+      code: 'INVALID_REFRESH_TOKEN',
+      status: 401,
     });
   });
 });

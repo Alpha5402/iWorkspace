@@ -14,8 +14,16 @@ const ApiConfigSchema = z.object({
   S3_ENDPOINT: z.url(),
   S3_REGION: z.string().min(1),
   S3_SECRET_KEY: z.string().min(1),
-  AUTH_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
-  AUTH_PUBLIC_KEY_BASE64: z.string().min(1).optional(),
+  AUTH_ACCESS_KEY_ID: z.string().min(1).optional(),
+  AUTH_ACCESS_PREVIOUS_KEY_ID: z.string().min(1).optional(),
+  AUTH_ACCESS_PREVIOUS_PUBLIC_KEY_BASE64: z.string().min(1).optional(),
+  AUTH_ACCESS_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
+  AUTH_ACCESS_PUBLIC_KEY_BASE64: z.string().min(1).optional(),
+  AUTH_REFRESH_KEY_ID: z.string().min(1).optional(),
+  AUTH_REFRESH_PREVIOUS_KEY_ID: z.string().min(1).optional(),
+  AUTH_REFRESH_PREVIOUS_PUBLIC_KEY_BASE64: z.string().min(1).optional(),
+  AUTH_REFRESH_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
+  AUTH_REFRESH_PUBLIC_KEY_BASE64: z.string().min(1).optional(),
   GITHUB_APP_SLUG: z.string().min(1).optional(),
   GITHUB_APP_ID: z.string().regex(/^\d+$/).optional(),
   GITHUB_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
@@ -30,8 +38,8 @@ export type ApiConfig = Readonly<{
   host: string;
   logLevel: string;
   m1?: Readonly<{
-    authPrivateKeyPem: string;
-    authPublicKeyPem: string;
+    authAccessKeys: ConfiguredJwtKeySet;
+    authRefreshKeys: ConfiguredJwtKeySet;
     githubAppSlug: string;
     githubAppId: string;
     githubPrivateKeyPem: string;
@@ -60,8 +68,22 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv): ApiConfig {
     config.M1_ENABLED === 'false'
       ? undefined
       : {
-          authPrivateKeyPem: decodePem(config.AUTH_PRIVATE_KEY_BASE64, 'AUTH_PRIVATE_KEY_BASE64'),
-          authPublicKeyPem: decodePem(config.AUTH_PUBLIC_KEY_BASE64, 'AUTH_PUBLIC_KEY_BASE64'),
+          authAccessKeys: loadJwtKeySet({
+            currentKeyId: config.AUTH_ACCESS_KEY_ID,
+            currentPrivateKeyBase64: config.AUTH_ACCESS_PRIVATE_KEY_BASE64,
+            currentPublicKeyBase64: config.AUTH_ACCESS_PUBLIC_KEY_BASE64,
+            name: 'AUTH_ACCESS',
+            previousKeyId: config.AUTH_ACCESS_PREVIOUS_KEY_ID,
+            previousPublicKeyBase64: config.AUTH_ACCESS_PREVIOUS_PUBLIC_KEY_BASE64,
+          }),
+          authRefreshKeys: loadJwtKeySet({
+            currentKeyId: config.AUTH_REFRESH_KEY_ID,
+            currentPrivateKeyBase64: config.AUTH_REFRESH_PRIVATE_KEY_BASE64,
+            currentPublicKeyBase64: config.AUTH_REFRESH_PUBLIC_KEY_BASE64,
+            name: 'AUTH_REFRESH',
+            previousKeyId: config.AUTH_REFRESH_PREVIOUS_KEY_ID,
+            previousPublicKeyBase64: config.AUTH_REFRESH_PREVIOUS_PUBLIC_KEY_BASE64,
+          }),
           githubAppSlug: requireM1Value(config.GITHUB_APP_SLUG, 'GITHUB_APP_SLUG'),
           githubAppId: requireM1Value(config.GITHUB_APP_ID, 'GITHUB_APP_ID'),
           githubPrivateKeyPem: decodePem(
@@ -93,6 +115,53 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv): ApiConfig {
     port: config.API_PORT,
     rabbitMqUrl: config.RABBITMQ_URL,
     serviceName: config.OTEL_SERVICE_NAME,
+  };
+}
+
+type ConfiguredJwtKeySet = Readonly<{
+  current: Readonly<{ keyId: string; privateKeyPem: string; publicKeyPem: string }>;
+  verificationKeys: readonly Readonly<{ keyId: string; publicKeyPem: string }>[];
+}>;
+
+function loadJwtKeySet(
+  input: Readonly<{
+    currentKeyId?: string | undefined;
+    currentPrivateKeyBase64?: string | undefined;
+    currentPublicKeyBase64?: string | undefined;
+    name: 'AUTH_ACCESS' | 'AUTH_REFRESH';
+    previousKeyId?: string | undefined;
+    previousPublicKeyBase64?: string | undefined;
+  }>,
+): ConfiguredJwtKeySet {
+  const currentKeyId = requireM1Value(input.currentKeyId, `${input.name}_KEY_ID`);
+  const current = {
+    keyId: currentKeyId,
+    privateKeyPem: decodePem(input.currentPrivateKeyBase64, `${input.name}_PRIVATE_KEY_BASE64`),
+    publicKeyPem: decodePem(input.currentPublicKeyBase64, `${input.name}_PUBLIC_KEY_BASE64`),
+  };
+  const hasPreviousKeyId = input.previousKeyId !== undefined;
+  const hasPreviousPublicKey = input.previousPublicKeyBase64 !== undefined;
+  if (hasPreviousKeyId !== hasPreviousPublicKey) {
+    throw new Error(`${input.name}_PREVIOUS_KEY_PAIR_INCOMPLETE`);
+  }
+  if (!hasPreviousKeyId) {
+    return { current, verificationKeys: [current] };
+  }
+  if (input.previousKeyId === currentKeyId) {
+    throw new Error(`${input.name}_PREVIOUS_KEY_ID_MUST_DIFFER`);
+  }
+  return {
+    current,
+    verificationKeys: [
+      current,
+      {
+        keyId: input.previousKeyId,
+        publicKeyPem: decodePem(
+          input.previousPublicKeyBase64,
+          `${input.name}_PREVIOUS_PUBLIC_KEY_BASE64`,
+        ),
+      },
+    ],
   };
 }
 

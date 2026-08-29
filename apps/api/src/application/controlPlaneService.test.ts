@@ -1,6 +1,6 @@
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 
-import { AccessTokenService } from '@delivery/security';
+import { AccessTokenService, RefreshTokenService } from '@delivery/security';
 import { createMemoryDatabase } from '@delivery/testkit';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -9,14 +9,34 @@ import { ControlPlaneService } from './controlPlaneService.js';
 
 const PEPPER = 'control-plane-test-token-pepper';
 
-function accessTokens(): AccessTokenService {
-  const pair = generateKeyPairSync('ed25519');
-  return new AccessTokenService(
-    pair.privateKey.export({ format: 'pem', type: 'pkcs8' }),
-    pair.publicKey.export({ format: 'pem', type: 'spki' }),
-    'test',
-    'web',
-  );
+function tokenServices(): Readonly<{
+  access: AccessTokenService;
+  refresh: RefreshTokenService;
+}> {
+  const accessPair = generateKeyPairSync('ed25519');
+  const refreshPair = generateKeyPairSync('ed25519');
+  const accessKey = {
+    keyId: 'access-test-v1',
+    privateKeyPem: accessPair.privateKey.export({ format: 'pem', type: 'pkcs8' }),
+    publicKeyPem: accessPair.publicKey.export({ format: 'pem', type: 'spki' }),
+  };
+  const refreshKey = {
+    keyId: 'refresh-test-v1',
+    privateKeyPem: refreshPair.privateKey.export({ format: 'pem', type: 'pkcs8' }),
+    publicKeyPem: refreshPair.publicKey.export({ format: 'pem', type: 'spki' }),
+  };
+  return {
+    access: new AccessTokenService(
+      { current: accessKey, verificationKeys: [accessKey] },
+      'test',
+      'access',
+    ),
+    refresh: new RefreshTokenService(
+      { current: refreshKey, verificationKeys: [refreshKey] },
+      'test',
+      'refresh',
+    ),
+  };
 }
 
 const rule = {
@@ -38,7 +58,8 @@ describe('ControlPlaneService', () => {
 
   beforeEach(async () => {
     database = await createMemoryDatabase();
-    auth = new AuthService(database, accessTokens(), PEPPER);
+    const tokens = tokenServices();
+    auth = new AuthService(database, tokens.access, tokens.refresh, PEPPER);
     await bootstrapFirstAdmin({
       database,
       email: 'owner@example.com',

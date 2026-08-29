@@ -300,9 +300,9 @@ infra/
 
 #### JWT 双 Token 与会话安全
 
-- [ ] Access Token 和 Refresh Token 均使用 JWT；使用不同的 `typ`、Audience 和独立可轮换 EdDSA 密钥，防止两类 Token 混用。
-- [ ] Access JWT 默认 10 分钟，至少包含 `sub=userId`、`organizationId`、`sessionId` 和 `jti`；不把可变角色当成无需复核的长期授权事实。
-- [ ] Refresh JWT 默认 30 天，至少包含 `sub`、`sessionId`、`familyId`、`jti` 和 `tokenType=refresh`；数据库保存 Refresh Token 摘要/JTI 状态，不保存明文。
+- [x] Access Token 和 Refresh Token 均使用 JWT；使用不同的 `typ`、Audience 和独立可轮换 EdDSA 密钥，防止两类 Token 混用。
+- [x] Access JWT 默认 10 分钟，至少包含 `sub=userId`、`organizationId`、`sessionId` 和 `jti`；不把可变角色当成无需复核的长期授权事实。
+- [x] Refresh JWT 默认 30 天，至少包含 `sub`、`sessionId`、`familyId`、`jti` 和 `tokenType=refresh`；数据库保存 Refresh Token 摘要/JTI 状态，不保存明文。
 - [ ] Refresh JWT 每次使用都旋转；旧 Token 重用、账户停用、密码变更、管理员撤销或用户“退出全部设备”时撤销整个 Session Family。
 - [ ] Access/Refresh JWT 继续使用 `HttpOnly + Secure + SameSite=Lax` Cookie；Refresh Cookie 限定 `/api/v1/auth` 路径，前端不得写入 Local Storage。
 - [ ] 所有写请求继续执行 CSRF Header 与 Origin 校验；平台角色和 Membership 在服务端读取当前状态，角色撤销不能依赖旧 JWT 自然过期。
@@ -329,7 +329,7 @@ infra/
 - [ ] 通过前向 Migration 扩展用户状态与平台角色，新增邮箱验证、Session/JTI、角色变更和限流数据；禁止修改已发布 Migration。
 - [ ] 为规范化邮箱、未消费验证 Token、Session JTI、最后一个 `SUPER_ADMIN` 和角色变更并发建立数据库约束或事务锁。
 - [ ] API 普通租户连接不得获得无界跨租户权限；平台管理查询使用单独、最小授权的 Repository/数据库角色，不复用 Migrator 或超级管理员连接。
-- [ ] 设计 Access/Refresh JWT 密钥版本字段和双密钥轮换窗口，保证部署滚动升级期间旧 Token 可验证、新 Token 使用最新 Key。
+- [x] 设计 Access/Refresh JWT 密钥版本字段和双密钥轮换窗口，保证部署滚动升级期间旧 Token 可验证、新 Token 使用最新 Key。
 
 #### 关键决策与 Trade-off
 

@@ -3,11 +3,12 @@ import {
   createDecipheriv,
   createHmac,
   randomBytes,
+  randomUUID,
   timingSafeEqual,
 } from 'node:crypto';
 
 import argon2 from 'argon2';
-import { importPKCS8, importSPKI, jwtVerify, SignJWT } from 'jose';
+import { importPKCS8, importSPKI, jwtVerify, type JWTPayload, SignJWT } from 'jose';
 import { z } from 'zod';
 
 const TOKEN_BYTES = 32;
@@ -25,6 +26,10 @@ export const organizationRoles = ['OWNER', 'ADMIN', 'MEMBER'] as const;
 export type OrganizationRole = (typeof organizationRoles)[number];
 export const projectRoles = ['MAINTAINER', 'REVIEWER', 'VIEWER'] as const;
 export type ProjectRole = (typeof projectRoles)[number];
+export const platformRoles = ['SUPER_ADMIN', 'ADMIN', 'USER'] as const;
+export type PlatformRole = (typeof platformRoles)[number];
+export const userAccountStatuses = ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED'] as const;
+export type UserAccountStatus = (typeof userAccountStatuses)[number];
 
 export type Permission =
   'organization:manage' | 'project:manage' | 'review:trigger' | 'review:read' | 'artifact:read';
@@ -180,44 +185,168 @@ export function decryptSecret(envelope: EnvelopeCiphertext, keyEncryptionKey: Bu
   ).toString('utf8');
 }
 
+export type JwtSigningKey = Readonly<{
+  keyId: string;
+  privateKeyPem: string;
+}>;
+
+export type JwtVerificationKey = Readonly<{
+  keyId: string;
+  publicKeyPem: string;
+}>;
+
+export type JwtKeySet = Readonly<{
+  current: JwtSigningKey;
+  verificationKeys: readonly JwtVerificationKey[];
+}>;
+
 const AccessTokenClaimsSchema = z.object({
+  jti: z.uuid(),
   organizationId: z.uuid(),
   sessionId: z.uuid(),
   sub: z.uuid(),
+  tokenType: z.literal('access'),
 });
 export type AccessTokenClaims = z.infer<typeof AccessTokenClaimsSchema>;
+export type AccessTokenInput = Omit<AccessTokenClaims, 'jti' | 'tokenType'>;
 
-export class AccessTokenService {
-  public constructor(
-    private readonly privateKeyPem: string,
-    private readonly publicKeyPem: string,
-    private readonly issuer: string,
-    private readonly audience: string,
-  ) {}
+const RefreshTokenClaimsSchema = z.object({
+  familyId: z.uuid(),
+  jti: z.uuid(),
+  organizationId: z.uuid(),
+  sessionId: z.uuid(),
+  sub: z.uuid(),
+  tokenType: z.literal('refresh'),
+});
+export type RefreshTokenClaims = z.infer<typeof RefreshTokenClaimsSchema>;
+export type RefreshTokenInput = Omit<RefreshTokenClaims, 'tokenType'>;
 
-  public async issue(claims: AccessTokenClaims, now = new Date()): Promise<string> {
-    const key = await importPKCS8(this.privateKeyPem, 'EdDSA');
-    return new SignJWT({ organizationId: claims.organizationId, sessionId: claims.sessionId })
-      .setProtectedHeader({ alg: 'EdDSA', typ: 'JWT' })
+const ACCESS_TOKEN_TTL_SECONDS = 10 * 60;
+const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+abstract class EdDsaJwtService {
+  private readonly verificationKeys: ReadonlyMap<string, string>;
+
+  protected constructor(
+    private readonly keys: JwtKeySet,
+    protected readonly issuer: string,
+    protected readonly audience: string,
+    private readonly tokenHeaderType: 'at+jwt' | 'rt+jwt',
+  ) {
+    if (
+      keys.current.keyId.length === 0 ||
+      !keys.verificationKeys.some((key) => key.keyId === keys.current.keyId)
+    ) {
+      throw new Error('JWT_CURRENT_KEY_MUST_BE_VERIFIABLE');
+    }
+    this.verificationKeys = new Map(
+      keys.verificationKeys.map((key) => [key.keyId, key.publicKeyPem]),
+    );
+  }
+
+  protected async signer(): Promise<Awaited<ReturnType<typeof importPKCS8>>> {
+    return importPKCS8(this.keys.current.privateKeyPem, 'EdDSA');
+  }
+
+  protected currentSigningKeyId(): string {
+    return this.keys.current.keyId;
+  }
+
+  protected protectedHeader(): Readonly<{ alg: 'EdDSA'; kid: string; typ: string }> {
+    return { alg: 'EdDSA', kid: this.keys.current.keyId, typ: this.tokenHeaderType };
+  }
+
+  protected async verifyJwt(token: string): Promise<JWTPayload> {
+    const result = await jwtVerify(
+      token,
+      async (protectedHeader) => {
+        const keyId = protectedHeader.kid;
+        const publicKeyPem = keyId === undefined ? undefined : this.verificationKeys.get(keyId);
+        if (publicKeyPem === undefined) throw new Error('JWT_SIGNING_KEY_UNKNOWN');
+        return importSPKI(publicKeyPem, 'EdDSA');
+      },
+      {
+        algorithms: ['EdDSA'],
+        audience: this.audience,
+        issuer: this.issuer,
+        requiredClaims: ['exp', 'iat', 'jti', 'sub'],
+      },
+    );
+    if (result.protectedHeader.typ !== this.tokenHeaderType) {
+      throw new Error('JWT_TOKEN_TYPE_INVALID');
+    }
+    return result.payload;
+  }
+}
+
+export class AccessTokenService extends EdDsaJwtService {
+  public constructor(keys: JwtKeySet, issuer: string, audience: string) {
+    super(keys, issuer, audience, 'at+jwt');
+  }
+
+  public async issue(claims: AccessTokenInput, now = new Date()): Promise<string> {
+    return new SignJWT({
+      organizationId: claims.organizationId,
+      sessionId: claims.sessionId,
+      tokenType: 'access',
+    })
+      .setProtectedHeader(this.protectedHeader())
+      .setJti(randomUUID())
       .setSubject(claims.sub)
       .setIssuer(this.issuer)
       .setAudience(this.audience)
       .setIssuedAt(Math.floor(now.getTime() / 1_000))
-      .setExpirationTime(Math.floor(now.getTime() / 1_000) + 600)
-      .sign(key);
+      .setExpirationTime(Math.floor(now.getTime() / 1_000) + ACCESS_TOKEN_TTL_SECONDS)
+      .sign(await this.signer());
   }
 
   public async verify(token: string): Promise<AccessTokenClaims> {
-    const key = await importSPKI(this.publicKeyPem, 'EdDSA');
-    const result = await jwtVerify(token, key, {
-      algorithms: ['EdDSA'],
-      audience: this.audience,
-      issuer: this.issuer,
-    });
+    const payload = await this.verifyJwt(token);
     return AccessTokenClaimsSchema.parse({
-      organizationId: result.payload.organizationId,
-      sessionId: result.payload.sessionId,
-      sub: result.payload.sub,
+      jti: payload.jti,
+      organizationId: payload.organizationId,
+      sessionId: payload.sessionId,
+      sub: payload.sub,
+      tokenType: payload.tokenType,
+    });
+  }
+}
+
+export class RefreshTokenService extends EdDsaJwtService {
+  public constructor(keys: JwtKeySet, issuer: string, audience: string) {
+    super(keys, issuer, audience, 'rt+jwt');
+  }
+
+  public get signingKeyId(): string {
+    return this.currentSigningKeyId();
+  }
+
+  public async issue(claims: RefreshTokenInput, now = new Date()): Promise<string> {
+    return new SignJWT({
+      familyId: claims.familyId,
+      organizationId: claims.organizationId,
+      sessionId: claims.sessionId,
+      tokenType: 'refresh',
+    })
+      .setProtectedHeader(this.protectedHeader())
+      .setJti(claims.jti)
+      .setSubject(claims.sub)
+      .setIssuer(this.issuer)
+      .setAudience(this.audience)
+      .setIssuedAt(Math.floor(now.getTime() / 1_000))
+      .setExpirationTime(Math.floor(now.getTime() / 1_000) + REFRESH_TOKEN_TTL_SECONDS)
+      .sign(await this.signer());
+  }
+
+  public async verify(token: string): Promise<RefreshTokenClaims> {
+    const payload = await this.verifyJwt(token);
+    return RefreshTokenClaimsSchema.parse({
+      familyId: payload.familyId,
+      jti: payload.jti,
+      organizationId: payload.organizationId,
+      sessionId: payload.sessionId,
+      sub: payload.sub,
+      tokenType: payload.tokenType,
     });
   }
 }

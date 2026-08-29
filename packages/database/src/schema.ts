@@ -14,7 +14,8 @@ export interface UsersTable {
   email: string;
   email_canonical: Generated<string>;
   id: GeneratedId;
-  status: Generated<'ACTIVE' | 'DISABLED'>;
+  platform_role: Generated<'SUPER_ADMIN' | 'ADMIN' | 'USER'>;
+  status: Generated<'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED'>;
   updated_at: Generated<Timestamp>;
 }
 
@@ -74,6 +75,8 @@ export interface RefreshSessionsTable {
   organization_id: string;
   replaced_by: string | null;
   revoked_at: Timestamp | null;
+  signing_key_id: string;
+  token_jti: string;
   token_hash: string;
   used_at: Timestamp | null;
   user_id: string;

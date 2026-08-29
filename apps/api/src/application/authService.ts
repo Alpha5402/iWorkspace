@@ -5,7 +5,8 @@ import {
   type AccessTokenService,
   hashOpaqueToken,
   hashPassword,
-  issueOpaqueToken,
+  type RefreshTokenClaims,
+  type RefreshTokenService,
   verifyPassword,
 } from '@delivery/security';
 
@@ -31,6 +32,7 @@ export class AuthService {
   public constructor(
     private readonly database: DeliveryDatabase,
     private readonly accessTokens: AccessTokenService,
+    private readonly refreshTokens: RefreshTokenService,
     private readonly tokenPepper: string,
   ) {}
 
@@ -79,6 +81,12 @@ export class AuthService {
   }
 
   public async refresh(refreshToken: string): Promise<SessionBundle> {
+    let claims: RefreshTokenClaims;
+    try {
+      claims = await this.refreshTokens.verify(refreshToken);
+    } catch {
+      throw new HttpError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token is invalid.');
+    }
     const tokenHash = hashOpaqueToken(refreshToken, this.tokenPepper);
     const result = await this.database.transaction().execute(async (transaction) => {
       const session = await transaction
@@ -94,6 +102,8 @@ export class AuthService {
           'refresh_sessions.family_id',
           'refresh_sessions.user_id',
           'refresh_sessions.organization_id',
+          'refresh_sessions.signing_key_id',
+          'refresh_sessions.token_jti',
           'refresh_sessions.expires_at',
           'refresh_sessions.used_at',
           'refresh_sessions.revoked_at',
@@ -101,10 +111,19 @@ export class AuthService {
           'users.status',
           'organization_members.role',
         ])
+        .where('refresh_sessions.id', '=', claims.sessionId)
         .where('refresh_sessions.token_hash', '=', tokenHash)
         .forUpdate()
         .executeTakeFirst();
       if (session === undefined) {
+        throw new HttpError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token is invalid.');
+      }
+      if (
+        session.family_id !== claims.familyId ||
+        session.organization_id !== claims.organizationId ||
+        session.token_jti !== claims.jti ||
+        session.user_id !== claims.sub
+      ) {
         throw new HttpError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token is invalid.');
       }
       if (session.used_at !== null) {
@@ -124,8 +143,19 @@ export class AuthService {
         throw new HttpError(401, 'REFRESH_TOKEN_EXPIRED', 'Refresh token is no longer active.');
       }
       const nextSessionId = randomUUID();
-      const issued = issueOpaqueToken('iwrf', this.tokenPepper);
-      const expiresAt = new Date(Date.now() + REFRESH_TTL_MILLISECONDS);
+      const nextTokenJti = randomUUID();
+      const issuedAt = new Date();
+      const expiresAt = new Date(issuedAt.getTime() + REFRESH_TTL_MILLISECONDS);
+      const nextRefreshToken = await this.refreshTokens.issue(
+        {
+          familyId: session.family_id,
+          jti: nextTokenJti,
+          organizationId: session.organization_id,
+          sessionId: nextSessionId,
+          sub: session.user_id,
+        },
+        issuedAt,
+      );
       await transaction
         .insertInto('refresh_sessions')
         .values({
@@ -135,7 +165,9 @@ export class AuthService {
           organization_id: session.organization_id,
           replaced_by: null,
           revoked_at: null,
-          token_hash: issued.hash,
+          signing_key_id: this.refreshTokens.signingKeyId,
+          token_hash: hashOpaqueToken(nextRefreshToken, this.tokenPepper),
+          token_jti: nextTokenJti,
           used_at: null,
           user_id: session.user_id,
         })
@@ -152,7 +184,7 @@ export class AuthService {
           sub: session.user_id,
         }),
         csrfToken: randomBytes(24).toString('base64url'),
-        refreshToken: issued.token,
+        refreshToken: nextRefreshToken,
         user: {
           email: session.email,
           id: session.user_id,
@@ -243,13 +275,33 @@ export class AuthService {
     });
   }
 
-  public verifyAccessToken(token: string): Promise<UserActor> {
-    return this.accessTokens.verify(token).then((claims) => ({
+  public async verifyAccessToken(token: string): Promise<UserActor> {
+    const claims = await this.accessTokens.verify(token);
+    const activeSession = await this.database
+      .selectFrom('refresh_sessions')
+      .innerJoin('users', 'users.id', 'refresh_sessions.user_id')
+      .innerJoin('organization_members', (join) =>
+        join
+          .onRef('organization_members.user_id', '=', 'refresh_sessions.user_id')
+          .onRef('organization_members.organization_id', '=', 'refresh_sessions.organization_id'),
+      )
+      .select('refresh_sessions.id')
+      .where('refresh_sessions.id', '=', claims.sessionId)
+      .where('refresh_sessions.user_id', '=', claims.sub)
+      .where('refresh_sessions.organization_id', '=', claims.organizationId)
+      .where('refresh_sessions.revoked_at', 'is', null)
+      .where('refresh_sessions.expires_at', '>', new Date())
+      .where('users.status', '=', 'ACTIVE')
+      .executeTakeFirst();
+    if (activeSession === undefined) {
+      throw new HttpError(401, 'ACCESS_SESSION_INACTIVE', 'Access session is no longer active.');
+    }
+    return {
       organizationId: claims.organizationId,
       sessionId: claims.sessionId,
       type: 'USER' as const,
       userId: claims.sub,
-    }));
+    };
   }
 
   private async createSession(
@@ -262,17 +314,30 @@ export class AuthService {
   ): Promise<SessionBundle> {
     const sessionId = randomUUID();
     const familyId = randomUUID();
-    const refresh = issueOpaqueToken('iwrf', this.tokenPepper);
+    const tokenJti = randomUUID();
+    const issuedAt = new Date();
+    const refreshToken = await this.refreshTokens.issue(
+      {
+        familyId,
+        jti: tokenJti,
+        organizationId: user.organizationId,
+        sessionId,
+        sub: user.userId,
+      },
+      issuedAt,
+    );
     await this.database
       .insertInto('refresh_sessions')
       .values({
-        expires_at: new Date(Date.now() + REFRESH_TTL_MILLISECONDS),
+        expires_at: new Date(issuedAt.getTime() + REFRESH_TTL_MILLISECONDS),
         family_id: familyId,
         id: sessionId,
         organization_id: user.organizationId,
         replaced_by: null,
         revoked_at: null,
-        token_hash: refresh.hash,
+        signing_key_id: this.refreshTokens.signingKeyId,
+        token_hash: hashOpaqueToken(refreshToken, this.tokenPepper),
+        token_jti: tokenJti,
         used_at: null,
         user_id: user.userId,
       })
@@ -284,7 +349,7 @@ export class AuthService {
         sub: user.userId,
       }),
       csrfToken: randomBytes(24).toString('base64url'),
-      refreshToken: refresh.token,
+      refreshToken,
       user: {
         email: user.email,
         id: user.userId,
@@ -310,7 +375,7 @@ export async function bootstrapFirstAdmin(
     }
     const user = await transaction
       .insertInto('users')
-      .values({ email: input.email, status: 'ACTIVE' })
+      .values({ email: input.email, platform_role: 'SUPER_ADMIN', status: 'ACTIVE' })
       .returning('id')
       .executeTakeFirstOrThrow();
     await transaction

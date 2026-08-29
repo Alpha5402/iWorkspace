@@ -3,7 +3,7 @@ import { createReadinessProbe } from '@delivery/health';
 import { createRabbitMqProbe } from '@delivery/messaging';
 import { createObjectStorageProbe, ImmutableArtifactStore } from '@delivery/object-storage';
 import { createLogger, startTelemetry } from '@delivery/observability';
-import { AccessTokenService } from '@delivery/security';
+import { AccessTokenService, RefreshTokenService } from '@delivery/security';
 import { GitHubAppProvider } from '@delivery/providers-github';
 
 import { AuthService } from './application/authService.js';
@@ -28,12 +28,8 @@ const m1Runtime =
     : {
         auth: new AuthService(
           database,
-          new AccessTokenService(
-            config.m1.authPrivateKeyPem,
-            config.m1.authPublicKeyPem,
-            'iworkspace',
-            'iworkspace-web',
-          ),
+          new AccessTokenService(config.m1.authAccessKeys, 'iworkspace', 'iworkspace-access'),
+          new RefreshTokenService(config.m1.authRefreshKeys, 'iworkspace', 'iworkspace-refresh'),
           config.m1.tokenPepper,
         ),
         artifactStore,
