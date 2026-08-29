@@ -203,6 +203,13 @@ export function createOpenApiDocument(m1Enabled = false): OpenApiDocument {
           tags: ['identity'],
         },
       },
+      '/api/v1/auth/change-password': {
+        post: {
+          operationId: 'changePassword',
+          responses: { 200: { description: 'Password changed and all sessions revoked' } },
+          tags: ['identity'],
+        },
+      },
       '/api/v1/auth/logout-others': {
         post: {
           operationId: 'logoutOtherSessions',

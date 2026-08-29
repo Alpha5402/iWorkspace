@@ -41,6 +41,17 @@ export type PlatformUserDetail = PlatformUserSummary &
       role: 'OWNER' | 'ADMIN' | 'MEMBER';
     }>[];
     sessions: readonly SessionSummary[];
+    tokens: readonly Readonly<{
+      createdAt: string;
+      expiresAt?: string;
+      id: string;
+      name: string;
+      projectId: string;
+      projectName: string;
+      revokedAt?: string;
+      scopes: readonly string[];
+      tokenPrefix: string;
+    }>[];
   }>;
 
 export class AdminService {
@@ -103,7 +114,7 @@ export class AdminService {
       .where('id', '=', userId)
       .executeTakeFirst();
     if (user === undefined) throw userNotFound();
-    const [memberships, sessionRows, databaseNow] = await Promise.all([
+    const [memberships, sessionRows, tokens, databaseNow] = await Promise.all([
       this.database
         .selectFrom('organization_members')
         .innerJoin('organizations', 'organizations.id', 'organization_members.organization_id')
@@ -117,6 +128,23 @@ export class AdminService {
         .orderBy('organizations.id', 'asc')
         .execute(),
       this.selectSessionRows(userId),
+      this.database
+        .selectFrom('platform_admin_user_token_metadata')
+        .select([
+          'created_at',
+          'expires_at',
+          'id',
+          'name',
+          'project_id',
+          'project_name',
+          'revoked_at',
+          'scopes',
+          'token_prefix',
+        ])
+        .where('created_by', '=', userId)
+        .orderBy('created_at', 'desc')
+        .orderBy('id', 'desc')
+        .execute(),
       getDatabaseNow(this.database),
     ]);
     return {
@@ -127,6 +155,17 @@ export class AdminService {
         role: membership.role,
       })),
       sessions: summarizeSessionFamilies(sessionRows, databaseNow),
+      tokens: tokens.map((token) => ({
+        createdAt: token.created_at.toISOString(),
+        ...(token.expires_at === null ? {} : { expiresAt: token.expires_at.toISOString() }),
+        id: token.id,
+        name: token.name,
+        projectId: token.project_id,
+        projectName: token.project_name,
+        ...(token.revoked_at === null ? {} : { revokedAt: token.revoked_at.toISOString() }),
+        scopes: token.scopes,
+        tokenPrefix: token.token_prefix,
+      })),
     };
   }
 

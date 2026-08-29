@@ -8,6 +8,7 @@ import { type Component } from 'vue';
 const mocks = vi.hoisted(() => ({
   acceptInvitation: vi.fn(),
   artifactDownloadUrl: vi.fn((id: string) => `/artifacts/${id}`),
+  changePassword: vi.fn(),
   createProject: vi.fn(),
   createRepositoryConnection: vi.fn(),
   createRuleset: vi.fn(),
@@ -88,6 +89,7 @@ describe('M1 management views', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acceptInvitation.mockResolvedValue(undefined);
+    mocks.changePassword.mockResolvedValue({ revokedFamilies: 1 });
     mocks.createProject.mockResolvedValue({ id: 'project' });
     mocks.createRepositoryConnection.mockResolvedValue(undefined);
     mocks.createRuleset.mockResolvedValue({ rulesetId: 'ruleset', versionId: 'version' });
@@ -102,6 +104,7 @@ describe('M1 management views', () => {
       platformRole: 'USER',
       sessions: [{ familyId: 'family' }],
       status: 'ACTIVE',
+      tokens: [],
       updatedAt: '2026-01-01T00:00:00.000Z',
     });
     mocks.getReview.mockResolvedValue({
@@ -402,6 +405,33 @@ describe('M1 management views', () => {
     await flushPromises();
     expect(account.wrapper.text()).toContain('Session 撤销失败');
     expect(account.router.currentRoute.value.path).toBe('/account');
+  });
+
+  it('changes the account password and returns to login after server-side family revocation', async () => {
+    const account = await mountAt(AccountView, '/account');
+    const passwordForm = account.wrapper.find('form');
+    const inputs = passwordForm.findAll('input');
+    await inputs[0]?.setValue('correct horse battery staple');
+    await inputs[1]?.setValue('a different secure password');
+    await passwordForm.trigger('submit');
+    await flushPromises();
+
+    expect(mocks.changePassword).toHaveBeenCalledWith(
+      'correct horse battery staple',
+      'a different secure password',
+    );
+    expect(account.router.currentRoute.value.path).toBe('/login');
+
+    mocks.changePassword.mockRejectedValueOnce('credential service unavailable');
+    const failed = await mountAt(AccountView, '/account');
+    const failedForm = failed.wrapper.find('form');
+    const failedInputs = failedForm.findAll('input');
+    await failedInputs[0]?.setValue('correct horse battery staple');
+    await failedInputs[1]?.setValue('a different secure password');
+    await failedForm.trigger('submit');
+    await flushPromises();
+    expect(failed.wrapper.text()).toContain('密码变更失败');
+    expect(failed.router.currentRoute.value.path).toBe('/account');
   });
 
   it('queries platform users and requires a confirmed reason for risky administration', async () => {

@@ -147,7 +147,9 @@ describe('API client', () => {
               ? { user: { id: 'user' } }
               : url.includes('/admin/users')
                 ? { users: [{ id: 'user' }] }
-                : url.includes('/auth/logout') || url.includes('/revoke-sessions')
+                : url.includes('/auth/logout') ||
+                    url.includes('/auth/change-password') ||
+                    url.includes('/revoke-sessions')
                   ? { revokedFamilies: 1 }
                   : url.includes('/auth/sessions/')
                     ? { currentSessionRevoked: false }
@@ -169,6 +171,7 @@ describe('API client', () => {
     await client.revokeSession('session');
     await client.logoutOtherSessions();
     await client.logoutAllSessions();
+    await client.changePassword('current secure password', 'different secure password');
     await expect(
       client.listPlatformUsers({ limit: 25, platformRole: 'USER', status: 'ACTIVE' }),
     ).resolves.toMatchObject({ users: [{ id: 'user' }] });

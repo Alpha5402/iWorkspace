@@ -358,4 +358,73 @@ describe('AuthService', () => {
     });
     await expect(auth.logoutAllSessions(actor)).resolves.toEqual({ revokedFamilies: 0 });
   });
+
+  it('changes the password atomically and invalidates every existing session family', async () => {
+    const first = await auth.login({
+      email: 'owner@example.com',
+      ipAddress: '192.0.2.106',
+      password: 'correct horse battery staple',
+    });
+    await auth.login({
+      email: 'owner@example.com',
+      ipAddress: '192.0.2.107',
+      password: 'correct horse battery staple',
+    });
+    const actor = await auth.verifyAccessToken(first.accessToken);
+
+    await expect(
+      auth.changePassword(
+        actor,
+        { currentPassword: 'incorrect current password', newPassword: 'a new secure password' },
+        'trace-password-invalid',
+      ),
+    ).rejects.toMatchObject({ code: 'CURRENT_PASSWORD_INVALID', status: 401 });
+    await expect(
+      auth.changePassword(
+        actor,
+        {
+          currentPassword: 'correct horse battery staple',
+          newPassword: 'correct horse battery staple',
+        },
+        'trace-password-same',
+      ),
+    ).rejects.toMatchObject({ code: 'PASSWORD_UNCHANGED', status: 409 });
+    await expect(
+      auth.changePassword(
+        actor,
+        {
+          currentPassword: 'correct horse battery staple',
+          newPassword: 'a new secure password',
+        },
+        'trace-password-change',
+      ),
+    ).resolves.toEqual({ revokedFamilies: 2 });
+    await expect(auth.verifyAccessToken(first.accessToken)).rejects.toMatchObject({
+      code: 'ACCESS_SESSION_INACTIVE',
+    });
+    await expect(
+      auth.login({
+        email: 'owner@example.com',
+        ipAddress: '192.0.2.108',
+        password: 'correct horse battery staple',
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
+    await expect(
+      auth.login({
+        email: 'owner@example.com',
+        ipAddress: '192.0.2.108',
+        password: 'a new secure password',
+      }),
+    ).resolves.toMatchObject({ user: { id: actor.userId } });
+    await expect(
+      database
+        .selectFrom('audit_events')
+        .select(['action', 'metadata'])
+        .where('action', '=', 'identity.password.changed')
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({
+      action: 'identity.password.changed',
+      metadata: { revokedFamilies: 2 },
+    });
+  });
 });

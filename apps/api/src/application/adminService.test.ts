@@ -62,6 +62,24 @@ describe('AdminService', () => {
       password: 'another secure password',
       userAgent: 'Second Browser',
     });
+    const project = await database
+      .insertInto('projects')
+      .values({ name: 'Token Project', organization_id: second.organizationId, slug: 'tokens' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto('project_api_tokens')
+      .values({
+        created_by: second.userId,
+        id: randomUUID(),
+        name: 'GitHub Action',
+        organization_id: second.organizationId,
+        project_id: project.id,
+        scopes: ['review:trigger'],
+        token_hash: 'redacted-hash',
+        token_prefix: 'iwpat_test',
+      })
+      .executeTakeFirstOrThrow();
 
     const firstPage = await admin.listUsers(superActor, { limit: 2 });
     expect(firstPage.users).toHaveLength(2);
@@ -87,6 +105,15 @@ describe('AdminService', () => {
           active: true,
           ipAddress: '192.0.2.41',
           userAgent: 'Second Browser',
+        },
+      ],
+      tokens: [
+        {
+          name: 'GitHub Action',
+          projectId: project.id,
+          projectName: 'Token Project',
+          scopes: ['review:trigger'],
+          tokenPrefix: 'iwpat_test',
         },
       ],
     });

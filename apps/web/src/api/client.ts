@@ -55,6 +55,17 @@ export type PlatformUserDetail = PlatformUserSummary &
       role: 'OWNER' | 'ADMIN' | 'MEMBER';
     }>[];
     sessions: readonly SessionSummary[];
+    tokens: readonly Readonly<{
+      createdAt: string;
+      expiresAt?: string;
+      id: string;
+      name: string;
+      projectId: string;
+      projectName: string;
+      revokedAt?: string;
+      scopes: readonly string[];
+      tokenPrefix: string;
+    }>[];
   }>;
 
 export type ApiClient = Readonly<{
@@ -93,6 +104,10 @@ export type ApiClient = Readonly<{
   revokeSession(sessionId: string): Promise<Readonly<{ currentSessionRevoked: boolean }>>;
   logoutOtherSessions(): Promise<Readonly<{ revokedFamilies: number }>>;
   logoutAllSessions(): Promise<Readonly<{ revokedFamilies: number }>>;
+  changePassword(
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<Readonly<{ revokedFamilies: number }>>;
   listPlatformUsers(
     input?: Readonly<{
       cursor?: string;
@@ -311,6 +326,12 @@ export function createApiClient(
     },
     async logoutAllSessions() {
       return request('/auth/logout-all', { method: 'POST' });
+    },
+    async changePassword(currentPassword, newPassword) {
+      return request('/auth/change-password', {
+        body: JSON.stringify({ currentPassword, newPassword }),
+        method: 'POST',
+      });
     },
     async listPlatformUsers(input = {}) {
       const query = new URLSearchParams();

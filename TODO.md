@@ -1,6 +1,6 @@
 # AI Delivery Control Plane 总体 TODO
 
-> 状态：M0 已完成。M1 原邀请制主闭环与 L2 自动化验证已完成；公开注册、邮箱验证、个人 Organization、PostgreSQL 限流、JWT 双 Token、平台管理员后台、组织切换与设备会话管理的 L2 已落地。身份 Principal 统一、密码变更撤销、用户 Token 元数据、Artifact GC、Ruleset 版本编辑、容量基线、真实 GitHub/DeepSeek、进程故障接管和 Dogfooding Proof Bundle（L3）仍待完成。M2、M3 未开始。
+> 状态：M0 已完成。M1 原邀请制主闭环与 L2 自动化验证已完成；公开注册、邮箱验证、个人 Organization、PostgreSQL 限流、JWT 双 Token、平台管理员后台、组织切换、设备会话、密码变更撤销与非敏感 Token 元数据的 L2 已落地。身份 Principal 统一、Artifact GC、Ruleset 版本编辑、容量基线、真实 GitHub/DeepSeek、进程故障接管和 Dogfooding Proof Bundle（L3）仍待完成。M2、M3 未开始。
 
 ## 0. 项目目标与阶段顺序
 
@@ -304,7 +304,7 @@ infra/
 - [x] Access JWT 默认 10 分钟，至少包含 `sub=userId`、`organizationId`、`sessionId` 和 `jti`；不把可变角色当成无需复核的长期授权事实。
 - [x] Refresh JWT 默认 30 天，至少包含 `sub`、`sessionId`、`familyId`、`jti` 和 `tokenType=refresh`；数据库保存 Refresh Token 摘要/JTI 状态，不保存明文。
 - [x] Refresh JWT 每次使用都旋转；旧 Token 重用、账户停用、管理员撤销或用户“退出全部设备”时撤销整个 Session Family。
-- [ ] 密码变更必须撤销该用户的全部 Session Family，并要求使用新密码重新登录。
+- [x] 密码变更必须撤销该用户的全部 Session Family，并要求使用新密码重新登录。
 - [x] Access/Refresh JWT 继续使用 `HttpOnly + Secure + SameSite=Lax` Cookie；Refresh Cookie 限定 `/api/v1/auth` 路径，前端不得写入 Local Storage。
 - [x] 所有写请求继续执行 CSRF Header 与 Origin 校验；平台角色和 Membership 在服务端读取当前状态，角色撤销不能依赖旧 JWT 自然过期。
 - [x] 支持登录设备/Session 列表、撤销单个 Session、退出其他设备和退出全部设备。
@@ -321,7 +321,7 @@ infra/
 
 - [x] 实现 `GET /api/v1/admin/users`，支持游标分页、邮箱/状态/平台角色筛选和稳定排序，禁止无界全表返回。
 - [x] 实现 `GET /api/v1/admin/users/:userId`，展示基础信息、平台角色、组织 Membership 和 Session 摘要，且不返回密码哈希、完整 Token、Cookie 或 Secret。
-- [ ] 在管理员用户详情中补充与该用户相关的项目 Token 非敏感元数据；禁止返回 Token 摘要和明文。
+- [x] 在管理员用户详情中补充由该用户创建的项目 Token 非敏感元数据；通过专用安全视图暴露，禁止返回 Token 摘要和明文。
 - [x] 实现用户停用/恢复、撤销所有 Session、授予/撤销 `ADMIN` 的用例和 API；所有操作要求原因并写入 Audit Event。
 - [x] Vue 3 新增注册、邮箱验证、组织切换和 `/admin/users` 页面；路由守卫只改善体验，后端必须独立执行完整授权。
 - [x] 管理员后台对高风险操作提供二次确认，并清楚区分平台角色、组织角色和项目角色。
@@ -348,7 +348,7 @@ infra/
 
 - [x] 覆盖重复邮箱并发注册、验证 Token 重放/过期、限流、邮箱 Provider 失败与 Outbox 重试。
 - [x] 覆盖 Access/Refresh 类型混淆、错误 Audience/Key、Refresh 重放、密钥轮换、账户停用和 Session 全量撤销。
-- [ ] 补充密码变更后的 Session 全量撤销测试。
+- [x] 补充密码变更后的 Session 全量撤销测试。
 - [x] 覆盖越权提权、最后一个 `SUPER_ADMIN` 保护、管理员不能隐式读取租户项目、跨组织切换和停用后的即时授权拒绝。
 - [x] 管理员用户列表验证游标分页稳定性、敏感字段缺失和操作审计。
 - [ ] 使用接近容量假设的数据量验证管理员用户查询计划与索引命中。

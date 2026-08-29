@@ -441,6 +441,85 @@ export class AuthService {
     });
   }
 
+  public async changePassword(
+    actor: UserActor,
+    input: Readonly<{ currentPassword: string; newPassword: string }>,
+    traceId: string,
+  ): Promise<Readonly<{ revokedFamilies: number }>> {
+    const credential = await this.database
+      .selectFrom('user_password_credentials')
+      .innerJoin('users', 'users.id', 'user_password_credentials.user_id')
+      .select(['user_password_credentials.password_hash', 'users.status'])
+      .where('user_password_credentials.user_id', '=', actor.userId)
+      .executeTakeFirst();
+    if (
+      credential === undefined ||
+      credential.status !== 'ACTIVE' ||
+      !(await verifyPassword(credential.password_hash, input.currentPassword))
+    ) {
+      throw new HttpError(401, 'CURRENT_PASSWORD_INVALID', 'Current password is incorrect.');
+    }
+    if (await verifyPassword(credential.password_hash, input.newPassword)) {
+      throw new HttpError(
+        409,
+        'PASSWORD_UNCHANGED',
+        'New password must differ from current password.',
+      );
+    }
+    const nextPasswordHash = await hashPassword(input.newPassword);
+    return this.database.transaction().execute(async (transaction) => {
+      const locked = await transaction
+        .selectFrom('user_password_credentials')
+        .select('password_hash')
+        .where('user_id', '=', actor.userId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (locked?.password_hash !== credential.password_hash) {
+        throw new HttpError(
+          409,
+          'PASSWORD_CHANGE_CONFLICT',
+          'Password changed during this request; sign in again.',
+        );
+      }
+      const databaseNow = await getDatabaseNow(transaction);
+      const families = await transaction
+        .selectFrom('refresh_sessions')
+        .select('family_id')
+        .distinct()
+        .where('user_id', '=', actor.userId)
+        .where('revoked_at', 'is', null)
+        .execute();
+      await transaction
+        .updateTable('user_password_credentials')
+        .set({ password_changed_at: databaseNow, password_hash: nextPasswordHash })
+        .where('user_id', '=', actor.userId)
+        .executeTakeFirstOrThrow();
+      if (families.length > 0) {
+        await transaction
+          .updateTable('refresh_sessions')
+          .set({ revoked_at: databaseNow })
+          .where('user_id', '=', actor.userId)
+          .where('revoked_at', 'is', null)
+          .execute();
+      }
+      await transaction
+        .insertInto('audit_events')
+        .values({
+          action: 'identity.password.changed',
+          actor_id: actor.userId,
+          actor_type: 'USER',
+          metadata: { revokedFamilies: families.length },
+          organization_id: actor.organizationId,
+          project_id: null,
+          target_id: actor.userId,
+          target_type: 'USER',
+          trace_id: traceId,
+        })
+        .executeTakeFirstOrThrow();
+      return { revokedFamilies: families.length };
+    });
+  }
+
   public async acceptInvitation(
     input: Readonly<{
       password: string;

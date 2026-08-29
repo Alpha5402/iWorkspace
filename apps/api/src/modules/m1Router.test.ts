@@ -53,6 +53,7 @@ function createRuntime(): M1Runtime {
     artifactStore: { get: vi.fn().mockResolvedValue(content) },
     auth: {
       acceptInvitation: vi.fn().mockResolvedValue({ organizationId }),
+      changePassword: vi.fn().mockResolvedValue({ revokedFamilies: 1 }),
       listOrganizations: vi.fn().mockResolvedValue([{ current: true, id: organizationId }]),
       listSessions: vi.fn().mockResolvedValue([{ current: true, sessionId: actor.sessionId }]),
       login: vi.fn().mockResolvedValue(session),
@@ -240,6 +241,14 @@ describe('M1 HTTP router', () => {
     const logoutAll = await mutating(request(app).post('/api/v1/auth/logout-all'));
     expect(logoutAll.status).toBe(200);
     expect(logoutAll.headers['set-cookie']).toEqual(
+      expect.arrayContaining([expect.stringContaining('iw_access=;')]),
+    );
+    const passwordChange = await mutating(request(app).post('/api/v1/auth/change-password')).send({
+      currentPassword: 'correct horse battery staple',
+      newPassword: 'a different secure password',
+    });
+    expect(passwordChange.status).toBe(200);
+    expect(passwordChange.headers['set-cookie']).toEqual(
       expect.arrayContaining([expect.stringContaining('iw_access=;')]),
     );
 

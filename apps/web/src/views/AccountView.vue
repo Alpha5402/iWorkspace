@@ -7,6 +7,8 @@ import { apiClient, type OrganizationSummary, type SessionSummary } from '../api
 const organizations = ref<readonly OrganizationSummary[]>([]);
 const sessions = ref<readonly SessionSummary[]>([]);
 const error = ref('');
+const currentPassword = ref('');
+const newPassword = ref('');
 const router = useRouter();
 
 async function load(): Promise<void> {
@@ -64,6 +66,16 @@ async function logoutAll(): Promise<void> {
   }
 }
 
+async function changePassword(): Promise<void> {
+  error.value = '';
+  try {
+    await apiClient.changePassword(currentPassword.value, newPassword.value);
+    await router.push('/login');
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '密码变更失败';
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -96,5 +108,26 @@ onMounted(load);
         <button type="button" @click="logoutAll">退出全部设备</button>
       </div>
     </div>
+    <form class="panel form-stack" @submit.prevent="changePassword">
+      <h2>变更密码</h2>
+      <p>密码更新成功后会撤销全部 Session Family，并要求重新登录。</p>
+      <label
+        >当前密码<input
+          v-model="currentPassword"
+          autocomplete="current-password"
+          minlength="12"
+          required
+          type="password"
+      /></label>
+      <label
+        >新密码<input
+          v-model="newPassword"
+          autocomplete="new-password"
+          minlength="12"
+          required
+          type="password"
+      /></label>
+      <button type="submit">更新密码并退出全部设备</button>
+    </form>
   </section>
 </template>

@@ -20,7 +20,7 @@ export interface UsersTable {
 }
 
 export interface UserPasswordCredentialsTable {
-  password_changed_at: Generated<Timestamp>;
+  password_changed_at: Timestamp;
   password_hash: string;
   user_id: string;
 }
@@ -139,6 +139,19 @@ export interface ProjectApiTokensTable {
   revoked_at: Timestamp | null;
   scopes: string[];
   token_hash: string;
+  token_prefix: string;
+}
+
+export interface PlatformAdminUserTokenMetadataView {
+  created_at: Timestamp;
+  created_by: string;
+  expires_at: Timestamp | null;
+  id: string;
+  name: string;
+  project_id: string;
+  project_name: string;
+  revoked_at: Timestamp | null;
+  scopes: string[];
   token_prefix: string;
 }
 
@@ -481,6 +494,7 @@ export interface DatabaseSchema {
   organization_members: OrganizationMembersTable;
   organizations: OrganizationsTable;
   outbox_events: OutboxEventsTable;
+  platform_admin_user_token_metadata: PlatformAdminUserTokenMetadataView;
   project_api_tokens: ProjectApiTokensTable;
   project_members: ProjectMembersTable;
   projects: ProjectsTable;

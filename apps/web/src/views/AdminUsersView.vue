@@ -133,6 +133,13 @@ onMounted(() => load());
           }}
         </p>
         <p>Session Family：{{ selected.sessions.length }}</p>
+        <p>创建的项目 Token：{{ selected.tokens.length }}</p>
+        <div v-for="token in selected.tokens" :key="token.id" class="list-row">
+          <span>
+            {{ token.projectName }} · {{ token.name }} · {{ token.tokenPrefix }}… ·
+            {{ token.revokedAt ? '已撤销' : '有效或待过期检查' }}
+          </span>
+        </div>
         <label>操作原因<input v-model="reason" minlength="3" required /></label>
         <div class="action-row">
           <button type="button" @click="changeStatus('SUSPENDED')">停用账户</button>

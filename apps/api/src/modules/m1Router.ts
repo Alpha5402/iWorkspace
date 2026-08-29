@@ -43,6 +43,10 @@ const AdminUserListQuerySchema = z.object({
   status: z.enum(['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED']).optional(),
 });
 const ReasonSchema = z.string().trim().min(3).max(500);
+const PasswordChangeSchema = z.object({
+  currentPassword: z.string().min(12),
+  newPassword: z.string().min(12),
+});
 const ProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
@@ -120,6 +124,7 @@ export type M1Runtime = Readonly<{
   auth: Pick<
     AuthService,
     | 'acceptInvitation'
+    | 'changePassword'
     | 'listOrganizations'
     | 'listSessions'
     | 'login'
@@ -540,6 +545,20 @@ export function createM1Router(runtime: M1Runtime): Router {
     asyncRoute(async (request, response) => {
       requireCsrf(request, runtime);
       const result = await runtime.auth.logoutAllSessions(await requireUser(request, runtime));
+      clearSessionCookies(response, runtime.secureCookies);
+      response.status(200).json(result);
+    }),
+  );
+
+  router.post(
+    '/auth/change-password',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const result = await runtime.auth.changePassword(
+        await requireUser(request, runtime),
+        PasswordChangeSchema.parse(request.body),
+        getResponseTraceId(response.locals),
+      );
       clearSessionCookies(response, runtime.secureCookies);
       response.status(200).json(result);
     }),

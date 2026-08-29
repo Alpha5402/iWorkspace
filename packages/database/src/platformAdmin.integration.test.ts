@@ -42,6 +42,13 @@ describeInfrastructure('platform administrator database role', () => {
     expect(role).toBe('iw_platform_admin');
     await expect(
       administratorDatabase
+        .selectFrom('platform_admin_user_token_metadata')
+        .select('id')
+        .limit(1)
+        .execute(),
+    ).resolves.toBeInstanceOf(Array);
+    await expect(
+      administratorDatabase
         .updateTable('users')
         .set({ status: 'SUSPENDED' })
         .where('id', '=', userId)
