@@ -1,11 +1,11 @@
 # AI Delivery Control Plane 总体 TODO
 
-> 状态：M0 已完成。M1 主闭环与 L2 自动化验证已完成；仍有 Artifact GC、Ruleset 版本编辑、容量基线等硬化项，以及真实 GitHub/DeepSeek、进程故障接管和 Dogfooding Proof Bundle（L3）待完成。M2、M3 未开始。
+> 状态：M0 已完成。M1 原邀请制主闭环与 L2 自动化验证已完成；M1 身份范围现扩展为公开注册、平台级用户分层、管理员后台和 JWT 双 Token，尚未实现。Artifact GC、Ruleset 版本编辑、容量基线、真实 GitHub/DeepSeek、进程故障接管和 Dogfooding Proof Bundle（L3）同样待完成。M2、M3 未开始。
 
 ## 0. 项目目标与阶段顺序
 
 - [x] M0：架构基线与工程骨架——建立可运行、可验证的框架，未实现模块明确返回 `501 FEATURE_NOT_IMPLEMENTED`。
-- [ ] M1：账户、数据库、安全与代码审查——主闭环与 L2 已完成，硬化项和 L3 退出门槛待完成。
+- [ ] M1：账户、数据库、安全与代码审查——原邀请制主闭环与 L2 已完成；公开注册和平台管理扩展、硬化项及 L3 退出门槛待完成。
 - [ ] M2：设计稿与 HTML 协作——完成需求/Figma/HTML、批注、Agent Patch、版本冲突、预览和审批。
 - [ ] M3：研发与最终交付闭环——完成文档裁切、Workspace、代码生成、验证、审查、Proof Bundle、Engineering Gate 和 PR。
 
@@ -205,7 +205,7 @@ infra/
 
 ### M1-01：身份、邀请与会话
 
-- [x] 首位管理员仅能通过可信 CLI 初始化，不开放公共注册。
+- [x] 当前基线由可信 CLI 初始化首位管理员，后续用户通过一次性邀请加入；公开注册由 M1-11 替换这一产品边界。
 - [x] 密码使用 Argon2id；一次性邀请令牌和旋转 Refresh Token 仅保存摘要。
 - [x] Access/Refresh Cookie 使用安全属性，写请求校验 CSRF Header 和 Origin。
 - [x] 旧 Refresh Token 重用会撤销整个 Family；最后一个 OWNER 受数据库和用例保护。
@@ -287,9 +287,70 @@ infra/
 - [ ] 使用真实 GitHub App、测试仓库和 DeepSeek 跑通 Webhook 与 Action Token 两条 L3 路径。
 - [ ] 运行本仓库 Dogfooding，并整理“需求 → 运行证据”的 M1 Proof Bundle。
 
+### M1-11：公开注册、平台用户分层与 JWT 双 Token
+
+#### 目标与角色边界
+
+- [ ] 开放公开注册，但新账户先进入 `PENDING_VERIFICATION`；完成邮箱验证后才激活账户并在同一事务创建个人 Organization。
+- [ ] 平台角色固定为 `SUPER_ADMIN / ADMIN / USER`，与组织角色 `OWNER / ADMIN / MEMBER`、项目角色 `MAINTAINER / REVIEWER / VIEWER` 相互独立，禁止根据名称相同隐式继承权限。
+- [ ] 首位 `SUPER_ADMIN` 仍由可信 CLI 创建；只有 `SUPER_ADMIN` 可以授予或撤销平台 `ADMIN`，并保护最后一个 `SUPER_ADMIN` 不被停用、降级或删除。
+- [ ] 平台 `ADMIN` 可以查询和管理全站普通用户、会话与账户状态，但不因平台角色自动获得任意租户项目数据访问权；进入租户业务仍需显式 Membership。
+- [ ] 统一 Principal 类型为 `USER_SESSION / PROJECT_TOKEN / SYSTEM`；所有权限决策和 Audit Event 必须记录 Principal 类型与稳定 ID。
+- [ ] 保留项目 Access Token 作为项目级机器身份，通过 `project_id + scopes + token_id` 鉴权；`created_by` 只表达创建者和审计血缘，不把机器 Token 伪装成创建它的用户。
+
+#### JWT 双 Token 与会话安全
+
+- [ ] Access Token 和 Refresh Token 均使用 JWT；使用不同的 `typ`、Audience 和独立可轮换 EdDSA 密钥，防止两类 Token 混用。
+- [ ] Access JWT 默认 10 分钟，至少包含 `sub=userId`、`organizationId`、`sessionId` 和 `jti`；不把可变角色当成无需复核的长期授权事实。
+- [ ] Refresh JWT 默认 30 天，至少包含 `sub`、`sessionId`、`familyId`、`jti` 和 `tokenType=refresh`；数据库保存 Refresh Token 摘要/JTI 状态，不保存明文。
+- [ ] Refresh JWT 每次使用都旋转；旧 Token 重用、账户停用、密码变更、管理员撤销或用户“退出全部设备”时撤销整个 Session Family。
+- [ ] Access/Refresh JWT 继续使用 `HttpOnly + Secure + SameSite=Lax` Cookie；Refresh Cookie 限定 `/api/v1/auth` 路径，前端不得写入 Local Storage。
+- [ ] 所有写请求继续执行 CSRF Header 与 Origin 校验；平台角色和 Membership 在服务端读取当前状态，角色撤销不能依赖旧 JWT 自然过期。
+- [ ] 支持登录设备/Session 列表、撤销单个 Session、退出其他设备和退出全部设备。
+
+#### 注册、组织切换与账户生命周期
+
+- [ ] 实现 `POST /api/v1/auth/register`、`POST /api/v1/auth/verify-email`、`POST /api/v1/auth/resend-verification`；重复邮箱和验证码状态使用稳定错误码且不泄露账户是否存在。
+- [ ] 邮箱验证 Token 使用高熵随机值、单次使用、短期过期并仅保存摘要；生产环境通过 Email Provider Port + Outbox 发送，禁止在响应和日志返回验证 Token。
+- [ ] 初期使用 PostgreSQL 记录公开注册、登录和重发验证的分布式限流桶；只有指标证明数据库成为瓶颈后才引入 Redis。
+- [ ] 实现 `GET /api/v1/me/organizations` 与 `POST /api/v1/auth/switch-organization`；切换时验证 Membership、撤销旧 Session Family 并签发绑定新 Organization 的双 Token。
+- [ ] 用户状态至少支持 `PENDING_VERIFICATION / ACTIVE / SUSPENDED`；停用采用可审计状态迁移，不物理删除用户、凭据、审计和历史运行血缘。
+
+#### 平台管理员后台
+
+- [ ] 实现 `GET /api/v1/admin/users`，支持游标分页、邮箱/状态/平台角色筛选和稳定排序，禁止无界全表返回。
+- [ ] 实现 `GET /api/v1/admin/users/:userId`，展示基础信息、平台角色、组织 Membership、Session 摘要和 Token 元数据，但永不返回密码哈希、完整 Token、Cookie 或 Secret。
+- [ ] 实现用户停用/恢复、撤销所有 Session、授予/撤销 `ADMIN` 的用例和 API；所有操作要求原因并写入 Audit Event。
+- [ ] Vue 3 新增注册、邮箱验证、组织切换和 `/admin/users` 页面；路由守卫只改善体验，后端必须独立执行完整授权。
+- [ ] 管理员后台对高风险操作提供二次确认，并清楚区分平台角色、组织角色和项目角色。
+
+#### 数据库与迁移
+
+- [ ] 通过前向 Migration 扩展用户状态与平台角色，新增邮箱验证、Session/JTI、角色变更和限流数据；禁止修改已发布 Migration。
+- [ ] 为规范化邮箱、未消费验证 Token、Session JTI、最后一个 `SUPER_ADMIN` 和角色变更并发建立数据库约束或事务锁。
+- [ ] API 普通租户连接不得获得无界跨租户权限；平台管理查询使用单独、最小授权的 Repository/数据库角色，不复用 Migrator 或超级管理员连接。
+- [ ] 设计 Access/Refresh JWT 密钥版本字段和双密钥轮换窗口，保证部署滚动升级期间旧 Token 可验证、新 Token 使用最新 Key。
+
+#### 关键决策与 Trade-off
+
+- [ ] 记录 ADR：公开注册扩大攻击面并增加 Email Provider、限流和账户枚举防护成本，但换来自助获客与独立用户身份。
+- [ ] 记录 ADR：Refresh Token 虽采用 JWT，仍保持服务端 Session/JTI 状态，因此牺牲“完全无状态”，换取旋转、重放检测、管理员撤销和设备管理能力。
+- [ ] 记录 ADR：平台管理员不自动绕过租户权限，增加一次显式授权检查，但显著缩小后台账号泄露后的数据暴露范围。
+- [ ] 记录 ADR：公开注册用户自动创建个人 Organization，避免没有租户上下文的悬空账户；代价是 Organization 数量会随注册用户增长。
+
+#### 测试与退出条件
+
+- [ ] 覆盖重复邮箱并发注册、验证 Token 重放/过期、限流、邮箱 Provider 失败与 Outbox 重试。
+- [ ] 覆盖 Access/Refresh 类型混淆、错误 Audience/Key、Refresh 重放、密钥轮换、账户停用、密码变更和 Session 全量撤销。
+- [ ] 覆盖越权提权、最后一个 `SUPER_ADMIN` 保护、管理员不能隐式读取租户项目、跨组织切换和停用后的即时授权拒绝。
+- [ ] 管理员用户列表验证分页稳定性、敏感字段缺失、操作审计和大数据量查询计划。
+- [ ] 浏览器真实跑通“公开注册 → 邮箱验证 → 登录 → 切换组织 → 管理员查询/停用用户 → Session 失效”，不使用前端 Mock 作为完成证据。
+- [ ] Identity、Security 核心分支覆盖率继续不低于 90%，并通过完整 `pnpm quality`、空库迁移和升级迁移测试。
+
 ### M1 退出门槛
 
-- [x] 数据库迁移、约束、安全测试、集成测试和质量门禁全部通过（L2）。
+- [x] 原邀请制身份与 Review 主闭环的数据库迁移、约束、安全测试、集成测试和质量门禁已通过（旧 L2 基线）。
+- [ ] 公开注册、平台用户分层、管理员后台与 JWT 双 Token 通过新的 L2 验收。
 - [ ] 真实 GitHub Action/Webhook → Review → GitHub Check 链路通过（L3）。
 - [ ] 真实进程/基础设施故障注入可重复运行且结果稳定（L3）。
 - [ ] 本仓库 Dogfooding Artifact 与 M1 Proof Bundle 已保存（L3）。
