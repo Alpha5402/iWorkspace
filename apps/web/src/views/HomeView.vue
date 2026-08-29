@@ -1,13 +1,8 @@
 <template>
   <section>
-    <p class="eyebrow">Architecture before features</p>
-    <h1>M0 工程框架</h1>
-    <p>
-      Control Plane、Worker、Sandbox Runner 与基础设施边界已经建立。业务能力会严格按 M1、M2、M3
-      顺序实现。
-    </p>
-    <div class="notice">
-      当前页面不展示模拟业务数据。未实现能力会明确返回 501，并显示对应计划阶段。
-    </div>
+    <p class="eyebrow">Recoverable review control plane</p>
+    <h1>M1 Review Harness</h1>
+    <p>身份安全、项目规则、GitHub App、异步审查、Verify 和可审计产物已接入真实后端路径。</p>
+    <div class="notice">管理台不展示模拟业务数据。M2/M3 未实现能力仍会明确返回 501。</div>
   </section>
 </template>

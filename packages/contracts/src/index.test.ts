@@ -29,8 +29,8 @@ describe('contracts', () => {
     expect(document.components.schemas).toHaveProperty('RunStatus');
   });
 
-  it('freezes the M0 Run status contract', () => {
-    expect(RunStatusSchema.parse('WAITING_APPROVAL')).toBe('WAITING_APPROVAL');
+  it('freezes the M1 Run status contract', () => {
+    expect(RunStatusSchema.parse('PARTIAL')).toBe('PARTIAL');
     expect(() => RunStatusSchema.parse('DONE')).toThrow();
   });
 

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "pnpm -r --sort --if-present build",
+    "bootstrap:admin": "pnpm --filter @delivery/api bootstrap:admin",
     "check:architecture": "depcruise --config dependency-cruiser.cjs apps packages",
     "check:dead-code": "knip",
     "check:duplication": "jscpd apps packages",
@@ -23,6 +24,7 @@
     "infra:logs": "docker compose --env-file .env -f infra/compose/docker-compose.yml logs -f",
     "infra:ps": "docker compose --env-file .env -f infra/compose/docker-compose.yml ps",
     "infra:up": "docker compose --env-file .env -f infra/compose/docker-compose.yml up -d --wait postgres rabbitmq minio jaeger otel-collector && docker compose --env-file .env -f infra/compose/docker-compose.yml run --rm minio-init",
+    "db:migrate": "pnpm --filter @delivery/database migrate up",
     "lint": "eslint . --max-warnings 0",
     "quality": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm check:architecture && pnpm check:dead-code && pnpm check:duplication && pnpm build",
     "start:api": "pnpm --filter @delivery/api start",

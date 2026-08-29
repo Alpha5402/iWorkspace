@@ -1,11 +1,11 @@
 # AI Delivery Control Plane 总体 TODO
 
-> 状态：M0 已完成并通过退出门槛。M1、M2、M3 尚未开始，开始 M1 前仍需用户明确批准。
+> 状态：M0 已完成。M1 主闭环与 L2 自动化验证已完成；仍有 Artifact GC、Ruleset 版本编辑、容量基线等硬化项，以及真实 GitHub/DeepSeek、进程故障接管和 Dogfooding Proof Bundle（L3）待完成。M2、M3 未开始。
 
 ## 0. 项目目标与阶段顺序
 
 - [x] M0：架构基线与工程骨架——建立可运行、可验证的框架，未实现模块明确返回 `501 FEATURE_NOT_IMPLEMENTED`。
-- [ ] M1：账户、数据库、安全与代码审查——先完成一条可故障注入、可追踪、可对账的可靠 CR 链路。
+- [ ] M1：账户、数据库、安全与代码审查——主闭环与 L2 已完成，硬化项和 L3 退出门槛待完成。
 - [ ] M2：设计稿与 HTML 协作——完成需求/Figma/HTML、批注、Agent Patch、版本冲突、预览和审批。
 - [ ] M3：研发与最终交付闭环——完成文档裁切、Workspace、代码生成、验证、审查、Proof Bundle、Engineering Gate 和 PR。
 
@@ -195,101 +195,104 @@ infra/
 
 ## 6. M1：账户、数据库、安全与代码审查
 
-### M1.1 数据库基础
+### M1-00：契约与数据库基础
 
-- [ ] 建立可审计、只向前演进的 Migration 流程。
-- [ ] 创建 `users`、`user_password_credentials`、`sessions`。
-- [ ] 创建 `organizations`、`organization_members`、`projects`、`project_members`。
-- [ ] 创建 `api_tokens`、`encrypted_secrets`、`secret_rotation_events`。
-- [ ] 创建 `audit_events`。
-- [ ] 所有租户数据包含明确的 Organization/Project 归属。
-- [ ] 建立邮箱规范化唯一约束、Membership 唯一约束、外键和必要 Check Constraint。
+- [x] 使用 Kysely、显式前向 Migration、独立数据库角色和事务工具。
+- [x] 建立 Identity、Tenant、Review、Task、Outbox/Inbox、Artifact、Evidence、Provider Invocation 和 External Effect 核心表。
+- [x] 使用唯一键、外键、Check Constraint、部分唯一索引和条件更新共同保证业务约束。
+- [x] 为租户表启用 RLS，并通过事务级租户上下文隔离 API/Worker 数据访问。
+- [x] 空库迁移、关键约束、RLS、`SKIP LOCKED` 和 JSONB 边界已有自动化测试。
 
-### M1.2 Identity、RBAC、Token 与 Secret
+### M1-01：身份、邀请与会话
 
-- [ ] 密码使用 Argon2id，禁止可逆加密密码。
-- [ ] Session Refresh Token 只存 Hash。
-- [ ] GitHub Action Access Token 使用高熵随机值，创建时只显示一次。
-- [ ] Access Token 数据库只存 public token ID/prefix、Hash、Scope、Project、过期和撤销信息。
-- [ ] 首期 Scope：`review:trigger`、`review:read`、`project:read`、`artifact:read`。
-- [ ] 第三方可恢复 Secret 使用 AES-256-GCM 信封加密，记录 nonce、AAD 和 key_version。
-- [ ] KEK 不进入数据库和仓库；支持密钥轮换。
-- [ ] 日志、Trace、消息和错误响应统一 Secret Redaction。
-- [ ] 为 GitHub OIDC 保留 Provider 接口，但不阻塞首期 Token 方案。
+- [x] 首位管理员仅能通过可信 CLI 初始化，不开放公共注册。
+- [x] 密码使用 Argon2id；一次性邀请令牌和旋转 Refresh Token 仅保存摘要。
+- [x] Access/Refresh Cookie 使用安全属性，写请求校验 CSRF Header 和 Origin。
+- [x] 旧 Refresh Token 重用会撤销整个 Family；最后一个 OWNER 受数据库和用例保护。
 
-### M1.3 可靠接入与消息基础
+### M1-02：项目 RBAC、Token、Secret 与 Audit
 
-- [ ] 创建 `webhook_inbox`、`idempotency_records`、`outbox_events`、`consumer_inbox`。
-- [ ] `(provider, delivery_id)` 唯一。
-- [ ] 业务状态和 Outbox Event 在同一数据库事务提交。
-- [ ] Outbox Relay 支持重试、锁、并发发布和可观测延迟。
-- [ ] Consumer 在副作用前后正确处理 Inbox、ACK/NACK 和重复投递。
-- [ ] 建立 DLQ 和人工重放 Runbook；重放不得绕过幂等。
+- [x] 实现组织/项目角色检查和成员的最小管理接口。
+- [x] 项目 Access Token 使用 256-bit 随机值和 Pepper HMAC 摘要，仅创建时返回一次明文。
+- [x] 实现 AES-256-GCM 信封加密、带版本 KEK 包装和 Secret 轮换记录。
+- [x] 管理、规则、Token、Secret、GitHub 连接和任务重放写入 Audit Event。
+- [x] 日志与错误边界执行敏感字段脱敏，不把部署密钥写入数据库。
 
-### M1.4 Workflow Core
+### M1-03：GitHub App 接入
 
-- [ ] 创建 `runs`、`run_input_snapshots`、`tasks`、`task_dependencies`、`attempts`。
-- [ ] 实现状态机和乐观锁。
-- [ ] 实现 Lease、Heartbeat、Timeout、Cancel、Retry 和 Fencing Token。
-- [ ] 同一 Task 同时最多有一个有效 Lease。
-- [ ] 旧 Attempt 不能覆盖新 Attempt 结果。
-- [ ] Run 输入一旦 QUEUED 即不可修改。
+- [x] 实现安装 URL/回调状态校验、仓库绑定、权限快照和按需 Installation Token。
+- [x] Webhook 使用原始请求体做 HMAC-SHA256 验签，并以 Delivery ID 去重。
+- [x] 自动 Review 的逻辑唯一键与 Action `Idempotency-Key` 均由数据库唯一约束原子裁决。
+- [x] 同一 Commit 的重复 Webhook 不产生第二个逻辑 Run；权限/认证错误使用稳定错误码。
+- [x] GitHub Connection 使用可审计的逻辑移除，并提供对应管理台入口。
 
-### M1.5 Artifact 与 Evidence
+### M1-04：异步作业内核
 
-- [ ] 创建 `artifacts`、`artifact_versions`、`evidence`。
-- [ ] Artifact Blob 写入 MinIO/S3；数据库只保存元数据、小型结构化索引和哈希。
-- [ ] ArtifactVersion 不可覆盖，使用 parent_version_id 表达血缘。
-- [ ] 校验对象存储内容哈希和数据库记录一致。
+- [x] 实现 Transactional Outbox、Publisher Confirm、Consumer Inbox 和版本化 Event Envelope。
+- [x] RabbitMQ 声明 Review 队列、TTL、重试路由和 Dead-letter Exchange。
+- [x] 实现数据库时间 Lease、Heartbeat、Attempt、Fencing Token、Retry Wait、Lease Reaper 和容量租约。
+- [x] Relay 所有权、重复消费、ACK/NACK、旧 Attempt 回写和延迟重试已有自动化测试。
+- [x] 失败任务查询与重放会生成新 Event ID，并保留 causationId。
+- [ ] 在真实多进程环境执行 Worker 强杀、Broker 中断和 DLQ 人工重放演练。
 
-### M1.6 Review Domain
+### M1-05：Artifact 与 Evidence
 
-- [ ] 创建 `repositories`、`repository_connections`。
-- [ ] 创建 `rulesets`、`ruleset_versions`；已发布版本不可修改。
-- [ ] 创建 `review_runs`、`review_batches`、`review_findings`、`finding_verifications`。
-- [ ] GitHub Action 入口：`POST /api/v1/projects/{projectId}/reviews`。
-- [ ] GitHub Webhook 入口：`POST /api/v1/integrations/github/webhooks`。
-- [ ] 两种入口归一化为相同 ReviewRequest 和 Run Input Snapshot。
-- [ ] 冻结 repository、base_sha、head_sha、diff_hash、ruleset_version 和触发者。
+- [x] MinIO 上传先写临时对象并校验哈希/大小，再提升为内容寻址正式对象。
+- [x] Review 输入、批次、模型调用、Finding 和报告通过 Artifact Link/Evidence 记录血缘。
+- [x] 生成固定 JSON、争议项、批次摘要、Coverage Manifest、文本摘要和 HTML 报告。
+- [x] 校验失败会清理临时对象，Artifact 下载时复核内容哈希。
+- [ ] 增加进程崩溃遗留临时对象及“正式对象成功、元数据事务回滚”孤儿对象的定时 GC。
 
-### M1.7 Review Harness
+### M1-06：Ruleset 与 Diff Pipeline
 
-- [ ] Git Diff 范围识别和解析。
-- [ ] Token/大小预算和安全裁切。
-- [ ] 依赖感知分批。
-- [ ] Design、Implementation、Defect 三类审查能力接口。
-- [ ] Rules Mapping。
-- [ ] 确定性规则先于 LLM 结论。
-- [ ] Verify 对 Finding 去重、过滤、重排并标记争议。
-- [ ] 结构化 Finding 包含 rule_id、severity、confidence、file、line、message、evidence、fingerprint 和 verification_status。
-- [ ] 生成 JSON、摘要和 HTML Review Artifact；输出必须绑定精确 head_sha 和 ruleset_version。
+- [x] 可创建 Ruleset Draft 并发布为不可变版本；Review 创建时冻结明确版本。
+- [x] 解析 GitHub Diff、Hunk 与新旧行位置，记录二进制/截断/超限 Coverage。
+- [x] 根据路径与语言映射规则，并按目录邻近/import 关系构建稳定批次。
+- [x] 受信任的确定性规则先执行；用户规则不能上传可执行脚本。
+- [x] 已发布 Ruleset Version 可显式切换为项目默认版本。
+- [ ] 补充 Draft 编辑和同一 Ruleset 下的新版本创建接口。
 
-### M1.8 ExternalEffect 与 GitHub 发布
+### M1-07：DeepSeek Review 与 Verify
 
-- [ ] 创建 `external_effects`、`external_effect_attempts`。
-- [ ] `logical_effect_key` 唯一。
-- [ ] 实现 GitHub Check/Comment Provider Adapter。
-- [ ] 网络结果不明时进入 `UNKNOWN`，禁止直接按失败重发。
-- [ ] Reconciler 根据 Provider Object ID 或稳定 Marker 对账。
-- [ ] Head SHA 已变化时旧 Review 标记 STALE，禁止发布为当前结果。
+- [x] 通过供应商无关 Provider Port 调用 `/responses`，本地 Zod 校验 JSON Schema 输出。
+- [x] Design、Implementation、Defect 分类 Review 与高严重度二次 Verify 已接入 DAG。
+- [x] Finding 位置、Evidence、Fingerprint、去重、降级/争议/拒绝规则均有确定性校验。
+- [x] 保存模型、Prompt/Schema 版本、输入哈希、Response ID、用量、耗时和错误分类，不保存思维链。
+- [x] Stub 覆盖非法输出修复、重复结果、429、5xx、超时和非重试错误。
+- [ ] 使用真实 `DEEPSEEK_API_KEY` 完成显式开启的 Provider E2E。
 
-### M1.9 故障注入验收
+### M1-08：GitHub Check 与 External Effect
 
-- [ ] 同一 GitHub Delivery ID 发送 5 次，只产生一个逻辑 ReviewRun。
-- [ ] Outbox 提交后 API 崩溃，Relay 恢复后仍能发布。
-- [ ] Worker 完成计算但 ACK 前崩溃，新 Attempt 能安全恢复。
-- [ ] GitHub 已接收评论但响应丢失，对账后不生成第二条。
-- [ ] Review 期间 Head SHA 更新，旧 Run 变为 STALE。
-- [ ] Worker A Lease 过期、B 接管后，A 恢复也无法覆盖 B。
-- [ ] 可以通过 trace_id 追踪 HTTP → DB → Outbox → MQ → Worker → Artifact → GitHub。
-- [ ] 任意日志、Trace、错误、消息和测试快照中不存在 Secret 明文。
+- [x] Check 创建使用唯一 Logical Effect、`external_id=reviewRunId` 和稳定详情 URL。
+- [x] 请求结果不确定时进入 `UNKNOWN`，通过 External ID 协调后才允许确定终态。
+- [x] 发布前复核 PR Head；新 Commit 会使旧 Run 进入 `STALE` 且不发布 Check。
+- [x] 最多选择 50 条已确认、可定位 Finding；只有 `CONFIRMED BLOCKING` 产生 `failure`。
+- [x] Installation Token 获取失败发生在 Check 不确定写入窗口之外，不会误标为 `UNKNOWN`。
+- [ ] 在真实 GitHub 上验证“服务端成功、客户端超时”不会创建第二个 Check Run。
+
+### M1-09：最小 Vue 3 管理台
+
+- [x] 登录、邀请接受、项目列表/创建、项目管理和 Review 详情调用真实 API Client。
+- [x] 项目页覆盖 GitHub 连接、Access Token、Ruleset 发布和 Review 触发/列表。
+- [x] Review 详情展示时间线、Coverage、Finding、Artifact，并通过 SSE + `Last-Event-ID` 恢复。
+- [x] 前端凭据不进入 Local Storage；错误、加载、空态和权限态有统一表达。
+- [x] 关键用户交互已有组件测试，不使用前端 Mock 数据作为运行事实。
+
+### M1-10：硬化与验收
+
+- [x] L2 质量门禁通过：Format、Lint、Typecheck、单元测试、集成测试、架构检查、Dead Code、重复度和 Build。
+- [x] Identity、Security、Review Harness 与 Domain 核心边界分别强制至少 90% 的分支覆盖率。
+- [x] 自动化覆盖重复投递、租约接管、Fencing、Head 变化、Provider 错误、Artifact 校验和 External Effect 协调。
+- [ ] 完成每日 10,000 Review / 100 活跃 Run 的容量基线并归档指标。
+- [ ] 使用真实 GitHub App、测试仓库和 DeepSeek 跑通 Webhook 与 Action Token 两条 L3 路径。
+- [ ] 运行本仓库 Dogfooding，并整理“需求 → 运行证据”的 M1 Proof Bundle。
 
 ### M1 退出门槛
 
-- [ ] 真实完成一条 GitHub Action/Webhook → Review → GitHub Delivery 链路。
-- [ ] 所有故障注入场景可重复运行且结果稳定。
-- [ ] 数据库迁移、约束、安全测试、集成测试和质量门禁全部通过。
-- [ ] 使用本项目 Review Harness 审查本仓库，并将结果作为 Dogfooding Artifact 保存。
+- [x] 数据库迁移、约束、安全测试、集成测试和质量门禁全部通过（L2）。
+- [ ] 真实 GitHub Action/Webhook → Review → GitHub Check 链路通过（L3）。
+- [ ] 真实进程/基础设施故障注入可重复运行且结果稳定（L3）。
+- [ ] 本仓库 Dogfooding Artifact 与 M1 Proof Bundle 已保存（L3）。
 
 ## 7. M2：设计稿与 HTML 协作
 

@@ -1,4 +1,13 @@
-import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { createHash, randomUUID } from 'node:crypto';
 import { type DependencyProbe } from '@delivery/health';
 
 export type ObjectStorageConfig = Readonly<{
@@ -48,4 +57,105 @@ export function createObjectStorageProbe(
       return Promise.resolve();
     },
   };
+}
+
+export type StoredArtifact = Readonly<{
+  contentHash: string;
+  objectKey: string;
+  sizeBytes: number;
+}>;
+
+type ArtifactStorageClient = Readonly<{
+  destroy(): void;
+  send(
+    command:
+      | CopyObjectCommand
+      | DeleteObjectCommand
+      | GetObjectCommand
+      | HeadObjectCommand
+      | PutObjectCommand,
+  ): Promise<unknown>;
+}>;
+
+const createDefaultArtifactClient = (config: ObjectStorageConfig): ArtifactStorageClient =>
+  new S3Client({
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+    endpoint: config.endpoint,
+    forcePathStyle: true,
+    region: config.region,
+  });
+
+export class ImmutableArtifactStore {
+  private readonly client: ArtifactStorageClient;
+
+  public constructor(
+    private readonly config: ObjectStorageConfig,
+    clientFactory: (
+      config: ObjectStorageConfig,
+    ) => ArtifactStorageClient = createDefaultArtifactClient,
+  ) {
+    this.client = clientFactory(config);
+  }
+
+  public async put(
+    input: Readonly<{
+      beforeCommit?: () => Promise<void>;
+      body: Buffer;
+      mediaType: string;
+      organizationId: string;
+      projectId: string;
+      runId: string;
+    }>,
+  ): Promise<StoredArtifact> {
+    const contentHash = createHash('sha256').update(input.body).digest('hex');
+    const temporaryKey = `tmp/${input.organizationId}/${input.runId}/${randomUUID()}`;
+    const objectKey = `artifacts/${input.organizationId}/${input.projectId}/${input.runId}/${contentHash}`;
+    await this.client.send(
+      new PutObjectCommand({
+        Body: input.body,
+        Bucket: this.config.bucket,
+        ContentType: input.mediaType,
+        Key: temporaryKey,
+        Metadata: { sha256: contentHash },
+      }),
+    );
+    try {
+      const head = (await this.client.send(
+        new HeadObjectCommand({ Bucket: this.config.bucket, Key: temporaryKey }),
+      )) as Readonly<{ ContentLength?: number; Metadata?: Record<string, string> }>;
+      if (head.ContentLength !== input.body.byteLength || head.Metadata?.sha256 !== contentHash) {
+        throw new Error('ARTIFACT_UPLOAD_VERIFICATION_FAILED');
+      }
+      await input.beforeCommit?.();
+      await this.client.send(
+        new CopyObjectCommand({
+          Bucket: this.config.bucket,
+          CopySource: `${this.config.bucket}/${temporaryKey}`,
+          Key: objectKey,
+          Metadata: { sha256: contentHash },
+          MetadataDirective: 'REPLACE',
+        }),
+      );
+      return { contentHash, objectKey, sizeBytes: input.body.byteLength };
+    } finally {
+      await this.client.send(
+        new DeleteObjectCommand({ Bucket: this.config.bucket, Key: temporaryKey }),
+      );
+    }
+  }
+
+  public async get(objectKey: string): Promise<Buffer> {
+    const result = (await this.client.send(
+      new GetObjectCommand({ Bucket: this.config.bucket, Key: objectKey }),
+    )) as Readonly<{ Body?: Readonly<{ transformToByteArray(): Promise<Uint8Array> }> }>;
+    if (result.Body === undefined) throw new Error('ARTIFACT_BODY_MISSING');
+    return Buffer.from(await result.Body.transformToByteArray());
+  }
+
+  public close(): void {
+    this.client.destroy();
+  }
 }

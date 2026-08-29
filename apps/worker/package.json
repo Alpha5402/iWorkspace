@@ -10,10 +10,18 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@delivery/contracts": "workspace:*",
     "@delivery/database": "workspace:*",
+    "@delivery/domain": "workspace:*",
     "@delivery/health": "workspace:*",
     "@delivery/messaging": "workspace:*",
     "@delivery/observability": "workspace:*",
+    "@delivery/object-storage": "workspace:*",
+    "@delivery/providers-agent": "workspace:*",
+    "@delivery/providers-github": "workspace:*",
     "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@delivery/testkit": "workspace:*"
   }
 }

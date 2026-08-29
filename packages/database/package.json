@@ -12,13 +12,16 @@
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
+    "migrate": "node --env-file-if-exists=../../.env ./node_modules/node-pg-migrate/bin/node-pg-migrate.js --migrations-dir migrations --migration-file-language ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@delivery/health": "workspace:*",
+    "kysely": "0.28.8",
     "pg": "8.23.0"
   },
   "devDependencies": {
-    "@types/pg": "8.23.1"
+    "@types/pg": "8.23.1",
+    "node-pg-migrate": "8.0.4"
   }
 }

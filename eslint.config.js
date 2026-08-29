@@ -33,7 +33,11 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/no-unnecessary-condition': 'error',
       '@typescript-eslint/require-await': 'error',
+      '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
       'no-console': 'error',
+      'vue/html-closing-bracket-newline': 'off',
+      'vue/html-indent': 'off',
+      'vue/html-self-closing': 'off',
       'vue/max-attributes-per-line': 'off',
       'vue/multi-word-component-names': 'off',
       'vue/singleline-html-element-content-newline': 'off',
@@ -47,9 +51,25 @@ export default tseslint.config(
     },
   },
   {
+    files: ['packages/database/migrations/*.ts'],
+    ...tseslint.configs.disableTypeChecked,
+  },
+  {
+    files: ['**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/consistent-type-imports': 'off',
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
+  {
     // The TypeScript ESLint project service cannot resolve Vue SFC-generated component
     // types. vue-tsc remains the authoritative strict type checker for these two adapters.
-    files: ['apps/web/src/main.ts', 'apps/web/src/router.ts', 'apps/web/src/App.test.ts'],
+    files: [
+      'apps/web/src/main.ts',
+      'apps/web/src/router.ts',
+      'apps/web/src/App.test.ts',
+      'apps/web/src/views/m1Views.test.ts',
+    ],
     rules: {
       '@typescript-eslint/no-unsafe-argument': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',

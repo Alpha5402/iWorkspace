@@ -1,9 +1,13 @@
-import { createPostgresProbe } from '@delivery/database';
+import { createDatabase, createPostgresProbe } from '@delivery/database';
 import { createReadinessProbe } from '@delivery/health';
 import { createRabbitMqProbe } from '@delivery/messaging';
-import { createObjectStorageProbe } from '@delivery/object-storage';
+import { createObjectStorageProbe, ImmutableArtifactStore } from '@delivery/object-storage';
 import { createLogger, startTelemetry } from '@delivery/observability';
+import { AccessTokenService } from '@delivery/security';
+import { GitHubAppProvider } from '@delivery/providers-github';
 
+import { AuthService } from './application/authService.js';
+import { ControlPlaneService } from './application/controlPlaneService.js';
 import { createApp } from './app.js';
 import { loadApiConfig } from './config.js';
 
@@ -15,7 +19,41 @@ const readinessProbe = createReadinessProbe([
   createRabbitMqProbe(config.rabbitMqUrl),
   createObjectStorageProbe(config.objectStorage),
 ]);
-const app = createApp({ logger, readinessProbe, serviceName: config.serviceName });
+const database = config.m1 === undefined ? undefined : createDatabase(config.databaseUrl);
+const artifactStore =
+  config.m1 === undefined ? undefined : new ImmutableArtifactStore(config.objectStorage);
+const m1Runtime =
+  config.m1 === undefined || database === undefined || artifactStore === undefined
+    ? undefined
+    : {
+        auth: new AuthService(
+          database,
+          new AccessTokenService(
+            config.m1.authPrivateKeyPem,
+            config.m1.authPublicKeyPem,
+            'iworkspace',
+            'iworkspace-web',
+          ),
+          config.m1.tokenPepper,
+        ),
+        artifactStore,
+        controlPlane: new ControlPlaneService(
+          database,
+          config.m1.tokenPepper,
+          config.m1.secretKeyEncryptionKey,
+        ),
+        github: new GitHubAppProvider(config.m1.githubAppId, config.m1.githubPrivateKeyPem),
+        githubAppSlug: config.m1.githubAppSlug,
+        githubWebhookSecret: config.m1.githubWebhookSecret,
+        secureCookies: process.env.NODE_ENV === 'production',
+        webOrigin: config.m1.webOrigin,
+      };
+const app = createApp({
+  logger,
+  ...(m1Runtime === undefined ? {} : { m1Runtime }),
+  readinessProbe,
+  serviceName: config.serviceName,
+});
 const server = app.listen(config.port, config.host, () => {
   logger.info({ host: config.host, port: config.port }, 'api listening');
 });
@@ -27,6 +65,8 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shuttingDown = true;
   logger.info({ signal }, 'api shutting down');
   server.close();
+  await database?.destroy();
+  artifactStore?.close();
   await readinessProbe.close();
   await telemetry.shutdown();
 }

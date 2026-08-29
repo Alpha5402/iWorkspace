@@ -55,6 +55,17 @@ describe('readiness', () => {
     await expect(evaluateProcessHealthRequest(options, '/health/ready')).resolves.toMatchObject({
       statusCode: 200,
     });
+    await expect(
+      evaluateProcessHealthRequest(
+        {
+          ...options,
+          readinessProbe: createReadinessProbe([
+            { name: 'docker', check: () => Promise.resolve({ name: 'docker', status: 'down' }) },
+          ]),
+        },
+        '/health/ready',
+      ),
+    ).resolves.toMatchObject({ body: { status: 'degraded' }, statusCode: 503 });
     await expect(evaluateProcessHealthRequest(options, '/missing')).resolves.toMatchObject({
       statusCode: 404,
     });

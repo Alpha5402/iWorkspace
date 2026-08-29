@@ -1,18 +1,30 @@
-import { createPostgresProbe } from '@delivery/database';
+import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
+
+import { createDatabase, createPostgresProbe } from '@delivery/database';
 import { createProcessHealthServer, createReadinessProbe } from '@delivery/health';
-import { createRabbitMqProbe } from '@delivery/messaging';
+import { createRabbitMqProbe, RabbitMqBus } from '@delivery/messaging';
+import { createObjectStorageProbe, ImmutableArtifactStore } from '@delivery/object-storage';
 import { createLogger, startServerSpan, startTelemetry } from '@delivery/observability';
+import { DeepSeekResponsesProvider } from '@delivery/providers-agent';
+import { GitHubAppProvider } from '@delivery/providers-github';
 
 import { loadWorkerConfig } from './config.js';
+import { ReviewWorker } from './reviewWorker.js';
 
 const serviceName = 'delivery-worker';
 const config = loadWorkerConfig(process.env);
 const logger = createLogger(serviceName, config.logLevel);
 const telemetry = startTelemetry(serviceName, config.otelEndpoint);
-const readinessProbe = createReadinessProbe([
+const readinessDependencies = [
   createPostgresProbe(config.databaseUrl),
   createRabbitMqProbe(config.rabbitMqUrl),
-]);
+] as const;
+const readinessProbe = createReadinessProbe(
+  config.m1 === undefined
+    ? readinessDependencies
+    : [...readinessDependencies, createObjectStorageProbe(config.m1.objectStorage)],
+);
 const healthServer = createProcessHealthServer({
   host: config.healthHost,
   port: config.healthPort,
@@ -23,10 +35,30 @@ const healthServer = createProcessHealthServer({
 
 healthServer.listen(config.healthPort, config.healthHost, () => {
   logger.info(
-    { host: config.healthHost, mode: 'm0-idle', port: config.healthPort },
+    {
+      host: config.healthHost,
+      mode: config.m1 === undefined ? 'm1-disabled' : 'm1-review',
+      port: config.healthPort,
+    },
     'worker health server listening',
   );
 });
+
+const database = config.m1 === undefined ? undefined : createDatabase(config.databaseUrl);
+const reviewWorker =
+  config.m1 === undefined || database === undefined
+    ? undefined
+    : new ReviewWorker(
+        database,
+        await RabbitMqBus.connect(config.rabbitMqUrl),
+        new GitHubAppProvider(config.m1.githubAppId, config.m1.githubPrivateKeyPem),
+        new DeepSeekResponsesProvider(config.m1.deepSeekApiKey),
+        new ImmutableArtifactStore(config.m1.objectStorage),
+        config.m1.detailsBaseUrl,
+        `${hostname()}:${process.pid}:${randomUUID()}`,
+        logger,
+      );
+await reviewWorker?.start();
 
 let shuttingDown = false;
 
@@ -35,6 +67,8 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shuttingDown = true;
   logger.info({ signal }, 'worker shutting down');
   healthServer.close();
+  await reviewWorker?.close();
+  await database?.destroy();
   await readinessProbe.close();
   await telemetry.shutdown();
 }

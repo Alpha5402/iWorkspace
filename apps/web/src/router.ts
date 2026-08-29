@@ -2,8 +2,13 @@ import { createRouter, createWebHistory, type Router } from 'vue-router';
 
 import CapabilityView from './views/CapabilityView.vue';
 import HomeView from './views/HomeView.vue';
+import InvitationAcceptView from './views/InvitationAcceptView.vue';
+import LoginView from './views/LoginView.vue';
 import NotFoundView from './views/NotFoundView.vue';
 import SystemStateView from './views/SystemStateView.vue';
+import ProjectsView from './views/ProjectsView.vue';
+import ProjectView from './views/ProjectView.vue';
+import ReviewDetailView from './views/ReviewDetailView.vue';
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -33,6 +38,11 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { component: HomeView, name: 'home', path: '/' },
+    { component: LoginView, name: 'login', path: '/login' },
+    { component: InvitationAcceptView, name: 'invitation-accept', path: '/invitations/accept' },
+    { component: ProjectsView, name: 'projects', path: '/projects' },
+    { component: ProjectView, name: 'project', path: '/projects/:projectId' },
+    { component: ReviewDetailView, name: 'review', path: '/reviews/:runId' },
     { component: CapabilityView, name: 'capability', path: '/capabilities/:capability' },
     {
       component: SystemStateView,

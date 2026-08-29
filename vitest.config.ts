@@ -13,6 +13,7 @@ export default defineConfig({
         '**/*.test.ts',
         '**/dist/**',
         '**/main.ts',
+        '**/cli/bootstrapAdmin.ts',
         '**/router.ts',
         '**/vite-env.d.ts',
       ],
@@ -20,7 +21,25 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],
       thresholds: {
+        'apps/api/src/application/authService.ts': {
+          branches: 90,
+          functions: 90,
+          lines: 90,
+          statements: 90,
+        },
+        'apps/worker/src/reviewHarness.ts': {
+          branches: 90,
+          functions: 90,
+          lines: 90,
+          statements: 90,
+        },
         'packages/domain/src/**': {
+          branches: 90,
+          functions: 90,
+          lines: 90,
+          statements: 90,
+        },
+        'packages/security/src/**': {
           branches: 90,
           functions: 90,
           lines: 90,

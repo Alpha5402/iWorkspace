@@ -3,6 +3,9 @@
   "workspaces": {
     ".": {
       "entry": ["vitest.integration.config.ts"]
+    },
+    "packages/database": {
+      "entry": ["migrations/*.ts"]
     }
   }
 }

@@ -40,4 +40,51 @@ describe('API configuration', () => {
   it('fails fast when required infrastructure configuration is absent', () => {
     expect(() => loadApiConfig({})).toThrow();
   });
+
+  it('decodes every M1 security value only when explicitly enabled', () => {
+    const privateKey = 'private pem';
+    const publicKey = 'public pem';
+    const githubKey = 'github pem';
+    const config = loadApiConfig({
+      ...validEnvironment,
+      AUTH_PRIVATE_KEY_BASE64: Buffer.from(privateKey).toString('base64'),
+      AUTH_PUBLIC_KEY_BASE64: Buffer.from(publicKey).toString('base64'),
+      GITHUB_APP_ID: '123',
+      GITHUB_APP_SLUG: 'iworkspace',
+      GITHUB_PRIVATE_KEY_BASE64: Buffer.from(githubKey).toString('base64'),
+      GITHUB_WEBHOOK_SECRET: 'github-webhook-secret',
+      M1_ENABLED: 'true',
+      SECRET_KEK_BASE64: Buffer.alloc(32, 7).toString('base64'),
+      TOKEN_PEPPER: 'token-pepper-with-at-least-thirty-two-characters',
+      WEB_ORIGIN: 'https://web.example.test',
+    });
+    expect(config.m1).toMatchObject({
+      authPrivateKeyPem: privateKey,
+      authPublicKeyPem: publicKey,
+      githubAppId: '123',
+      githubPrivateKeyPem: githubKey,
+      secretKeyEncryptionKey: Buffer.alloc(32, 7),
+    });
+  });
+
+  it('fails closed for missing M1 values and invalid envelope keys', () => {
+    expect(() => loadApiConfig({ ...validEnvironment, M1_ENABLED: 'true' })).toThrow(
+      'AUTH_PRIVATE_KEY_BASE64_REQUIRED_WHEN_M1_ENABLED',
+    );
+    expect(() =>
+      loadApiConfig({
+        ...validEnvironment,
+        AUTH_PRIVATE_KEY_BASE64: 'cHJpdmF0ZQ==',
+        AUTH_PUBLIC_KEY_BASE64: 'cHVibGlj',
+        GITHUB_APP_ID: '123',
+        GITHUB_APP_SLUG: 'app',
+        GITHUB_PRIVATE_KEY_BASE64: 'a2V5',
+        GITHUB_WEBHOOK_SECRET: 'github-webhook-secret',
+        M1_ENABLED: 'true',
+        SECRET_KEK_BASE64: Buffer.alloc(16).toString('base64'),
+        TOKEN_PEPPER: 'token-pepper-with-at-least-thirty-two-characters',
+        WEB_ORIGIN: 'https://web.example.test',
+      }),
+    ).toThrow('SECRET_KEK_BASE64_MUST_DECODE_TO_32_BYTES');
+  });
 });

@@ -82,8 +82,116 @@ a {
 
 .content {
   grid-area: content;
-  width: min(860px, 100%);
+  width: min(1200px, 100%);
   padding: 64px;
+}
+
+h2 {
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid #cbd3e2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+button {
+  width: fit-content;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  background: #3157d5;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.panel {
+  margin-top: 24px;
+  padding: 22px;
+  border: 1px solid #dfe5f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.narrow-panel {
+  max-width: 480px;
+}
+
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.two-column,
+.grid-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.card,
+.list-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px;
+  border: 1px solid #dfe5f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.list-row {
+  margin-top: 8px;
+}
+
+.card span,
+.finding span,
+.muted,
+small {
+  color: #667085;
+}
+
+.error-text {
+  color: #b42318;
+}
+
+.secret-once {
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border: 1px solid #f2c94c;
+  border-radius: 8px;
+  background: #fff9db;
+}
+
+.finding {
+  padding: 16px 0;
+  border-top: 1px solid #e5e9f1;
+}
+
+.finding strong,
+.finding span {
+  display: block;
+  margin-bottom: 6px;
 }
 
 h1 {
@@ -133,5 +241,10 @@ p {
 
   .content {
     padding: 36px 24px;
+  }
+
+  .two-column,
+  .grid-list {
+    grid-template-columns: 1fr;
   }
 }

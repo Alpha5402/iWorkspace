@@ -7,9 +7,9 @@ import RunStatusBadge from './RunStatusBadge.vue';
 
 describe('RunStatusBadge', () => {
   it('uses the frozen status presentation without creating a fake Run', () => {
-    const wrapper = mount(RunStatusBadge, { props: { status: 'WAITING_APPROVAL' } });
+    const wrapper = mount(RunStatusBadge, { props: { status: 'PARTIAL' } });
 
-    expect(wrapper.text()).toBe('等待审批');
+    expect(wrapper.text()).toBe('部分完成');
     expect(wrapper.attributes('data-tone')).toBe('warning');
   });
 });

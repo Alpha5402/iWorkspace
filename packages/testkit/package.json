@@ -13,5 +13,9 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@delivery/database": "workspace:*",
+    "pg-mem": "3.0.14"
   }
 }

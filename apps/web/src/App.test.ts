@@ -35,11 +35,11 @@ async function mountAt(path: string): Promise<VueWrapper> {
   });
 }
 
-describe('M0 Web shell', () => {
-  it('shows the honest M0 framework status', async () => {
+describe('M1 Web shell', () => {
+  it('shows the honest M1 review status', async () => {
     const wrapper = await mountAt('/');
 
-    expect(wrapper.text()).toContain('M0 工程框架');
+    expect(wrapper.text()).toContain('M1 Review Harness');
     expect(wrapper.text()).toContain('不展示模拟业务数据');
   });
 
