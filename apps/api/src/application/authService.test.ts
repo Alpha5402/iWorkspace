@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 
 import { AccessTokenService, hashPassword, RefreshTokenService } from '@delivery/security';
 import { createMemoryDatabase } from '@delivery/testkit';
@@ -235,5 +235,127 @@ describe('AuthService', () => {
       code: 'PUBLIC_AUTH_RATE_LIMITED',
       status: 429,
     });
+  });
+
+  it('lists memberships and switches organizations by revoking the previous family', async () => {
+    const secondOrganization = await database
+      .insertInto('organizations')
+      .values({ name: 'Second Organization' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const user = await database
+      .selectFrom('users')
+      .select('id')
+      .where('email_canonical', '=', 'owner@example.com')
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto('organization_members')
+      .values({ organization_id: secondOrganization.id, role: 'ADMIN', user_id: user.id })
+      .executeTakeFirstOrThrow();
+    const original = await auth.login({
+      email: 'owner@example.com',
+      ipAddress: '192.0.2.100',
+      password: 'correct horse battery staple',
+      userAgent: 'Original Browser',
+    });
+    const actor = await auth.verifyAccessToken(original.accessToken);
+
+    await expect(auth.listOrganizations(actor)).resolves.toEqual([
+      { current: true, id: organizationId, name: 'Example', role: 'OWNER' },
+      {
+        current: false,
+        id: secondOrganization.id,
+        name: 'Second Organization',
+        role: 'ADMIN',
+      },
+    ]);
+    const switched = await auth.switchOrganization(actor, secondOrganization.id, {
+      ipAddress: '192.0.2.101',
+      userAgent: 'Switched Browser',
+    });
+    await expect(auth.verifyAccessToken(original.accessToken)).rejects.toMatchObject({
+      code: 'ACCESS_SESSION_INACTIVE',
+    });
+    await expect(auth.verifyAccessToken(switched.accessToken)).resolves.toMatchObject({
+      organizationId: secondOrganization.id,
+      userId: user.id,
+    });
+    await expect(
+      auth.switchOrganization(await auth.verifyAccessToken(switched.accessToken), randomUUID(), {}),
+    ).rejects.toMatchObject({ code: 'ORGANIZATION_ACCESS_DENIED', status: 403 });
+  });
+
+  it('lists, revokes, and globally closes session families without exposing credentials', async () => {
+    const first = await auth.login({
+      email: 'owner@example.com',
+      ipAddress: '192.0.2.102',
+      password: 'correct horse battery staple',
+      userAgent: 'First Browser',
+    });
+    const second = await auth.login({
+      email: 'owner@example.com',
+      ipAddress: '192.0.2.103',
+      password: 'correct horse battery staple',
+      userAgent: 'Second Browser',
+    });
+    const firstActor = await auth.verifyAccessToken(first.accessToken);
+    const secondActor = await auth.verifyAccessToken(second.accessToken);
+    const sessions = await auth.listSessions(firstActor);
+    expect(sessions).toHaveLength(2);
+    expect(sessions.find((session) => session.current)).toMatchObject({
+      ipAddress: '192.0.2.102',
+      userAgent: 'First Browser',
+    });
+    expect(JSON.stringify(sessions)).not.toMatch(/token|csrf|cookie/i);
+    const secondSummary = sessions.find((session) => !session.current);
+    if (secondSummary === undefined) throw new Error('SECOND_SESSION_REQUIRED');
+    await expect(auth.revokeSession(firstActor, secondSummary.sessionId)).resolves.toEqual({
+      currentSessionRevoked: false,
+    });
+    await expect(auth.verifyAccessToken(second.accessToken)).rejects.toMatchObject({
+      code: 'ACCESS_SESSION_INACTIVE',
+    });
+
+    const third = await auth.login({
+      email: 'owner@example.com',
+      ipAddress: '192.0.2.104',
+      password: 'correct horse battery staple',
+    });
+    await expect(auth.logoutOtherSessions(firstActor)).resolves.toEqual({ revokedFamilies: 1 });
+    await expect(auth.verifyAccessToken(third.accessToken)).rejects.toMatchObject({
+      code: 'ACCESS_SESSION_INACTIVE',
+    });
+    await expect(auth.logoutAllSessions(firstActor)).resolves.toEqual({ revokedFamilies: 1 });
+    await expect(auth.verifyAccessToken(first.accessToken)).rejects.toMatchObject({
+      code: 'ACCESS_SESSION_INACTIVE',
+    });
+    await expect(auth.revokeSession(secondActor, randomUUID())).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND',
+      status: 404,
+    });
+  });
+
+  it('fails closed for stale session actors and reports current-family revocation', async () => {
+    const current = await auth.login({
+      email: 'owner@example.com',
+      ipAddress: '192.0.2.105',
+      password: 'correct horse battery staple',
+    });
+    const actor = await auth.verifyAccessToken(current.accessToken);
+    const staleActor = { ...actor, sessionId: randomUUID() };
+
+    await expect(auth.logoutOtherSessions(actor)).resolves.toEqual({ revokedFamilies: 0 });
+    await expect(auth.logoutOtherSessions(staleActor)).rejects.toMatchObject({
+      code: 'ACCESS_SESSION_INACTIVE',
+      status: 401,
+    });
+    await expect(auth.switchOrganization(staleActor, organizationId, {})).rejects.toMatchObject({
+      code: 'ACCESS_SESSION_INACTIVE',
+      status: 401,
+    });
+    await expect(auth.revokeSession(actor, actor.sessionId)).resolves.toEqual({
+      currentSessionRevoked: true,
+    });
+    await expect(auth.logoutAllSessions(actor)).resolves.toEqual({ revokedFamilies: 0 });
   });
 });

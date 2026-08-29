@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { type DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createMemoryHistory, createRouter, type Router } from 'vue-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Component } from 'vue';
 
 const mocks = vi.hoisted(() => ({
@@ -15,27 +15,45 @@ const mocks = vi.hoisted(() => ({
   disconnectRepositoryConnection: vi.fn(),
   eventUrl: vi.fn((id: string) => `/events/${id}`),
   getGitHubInstallUrl: vi.fn(),
+  getPlatformUser: vi.fn(),
   getReview: vi.fn(),
   listArtifacts: vi.fn(),
   listFindings: vi.fn(),
+  listOrganizations: vi.fn(),
+  listPlatformUsers: vi.fn(),
   listProjects: vi.fn(),
   listRepositoryConnections: vi.fn(),
   listReviews: vi.fn(),
   listRulesets: vi.fn(),
+  listSessions: vi.fn(),
   listTokens: vi.fn(),
   login: vi.fn(),
+  logoutAllSessions: vi.fn(),
+  logoutOtherSessions: vi.fn(),
   publishRuleset: vi.fn(),
+  register: vi.fn(),
+  resendVerification: vi.fn(),
+  revokePlatformUserSessions: vi.fn(),
+  revokeSession: vi.fn(),
   setDefaultRulesetVersion: vi.fn(),
+  setPlatformUserRole: vi.fn(),
+  setPlatformUserStatus: vi.fn(),
+  switchOrganization: vi.fn(),
   triggerReview: vi.fn(),
+  verifyEmail: vi.fn(),
 }));
 
 vi.mock('../api/client.js', () => ({ apiClient: mocks }));
 
+import AccountView from './AccountView.vue';
+import AdminUsersView from './AdminUsersView.vue';
 import InvitationAcceptView from './InvitationAcceptView.vue';
 import LoginView from './LoginView.vue';
 import ProjectView from './ProjectView.vue';
 import ProjectsView from './ProjectsView.vue';
+import RegisterView from './RegisterView.vue';
 import ReviewDetailView from './ReviewDetailView.vue';
+import VerifyEmailView from './VerifyEmailView.vue';
 
 async function mountAt(
   component: Component,
@@ -45,6 +63,10 @@ async function mountAt(
     history: createMemoryHistory(),
     routes: [
       { component, path: '/login' },
+      { component, path: '/register' },
+      { component, path: '/verify-email' },
+      { component, path: '/account' },
+      { component, path: '/admin/users' },
       { component, path: '/invitations/accept' },
       { component, path: '/projects' },
       { component, path: '/projects/:projectId' },
@@ -59,6 +81,10 @@ async function mountAt(
 }
 
 describe('M1 management views', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acceptInvitation.mockResolvedValue(undefined);
@@ -68,6 +94,16 @@ describe('M1 management views', () => {
     mocks.createToken.mockResolvedValue({ token: 'one-time-token' });
     mocks.disconnectRepositoryConnection.mockResolvedValue(undefined);
     mocks.getGitHubInstallUrl.mockResolvedValue('https://github.test/install');
+    mocks.getPlatformUser.mockResolvedValue({
+      createdAt: '2026-01-01T00:00:00.000Z',
+      email: 'user@example.com',
+      id: 'user',
+      memberships: [{ organizationName: 'Personal', role: 'OWNER' }],
+      platformRole: 'USER',
+      sessions: [{ familyId: 'family' }],
+      status: 'ACTIVE',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
     mocks.getReview.mockResolvedValue({
       coverage_complete: true,
       head_sha: 'head',
@@ -87,6 +123,22 @@ describe('M1 management views', () => {
         verification_status: 'CONFIRMED',
       },
     ]);
+    mocks.listOrganizations.mockResolvedValue([
+      { current: true, id: 'organization', name: 'Personal', role: 'OWNER' },
+      { current: false, id: 'second', name: 'Second', role: 'MEMBER' },
+    ]);
+    mocks.listPlatformUsers.mockResolvedValue({
+      users: [
+        {
+          createdAt: '2026-01-01T00:00:00.000Z',
+          email: 'user@example.com',
+          id: 'user',
+          platformRole: 'USER',
+          status: 'ACTIVE',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
     mocks.listProjects.mockResolvedValue([
       { id: 'project', name: 'Review', role: 'MAINTAINER', slug: 'review' },
     ]);
@@ -107,11 +159,31 @@ describe('M1 management views', () => {
     mocks.listRulesets.mockResolvedValue([
       { name: 'Baseline', version: 1, versionId: 'version', status: 'PUBLISHED' },
     ]);
+    mocks.listSessions.mockResolvedValue([
+      {
+        active: true,
+        current: true,
+        familyId: 'family',
+        ipAddress: '192.0.2.50',
+        sessionId: 'session',
+        userAgent: 'Browser',
+      },
+    ]);
     mocks.listTokens.mockResolvedValue([{ id: 'token' }]);
     mocks.login.mockResolvedValue(undefined);
+    mocks.logoutAllSessions.mockResolvedValue({ revokedFamilies: 1 });
+    mocks.logoutOtherSessions.mockResolvedValue({ revokedFamilies: 1 });
     mocks.publishRuleset.mockResolvedValue(undefined);
+    mocks.register.mockResolvedValue(undefined);
+    mocks.resendVerification.mockResolvedValue(undefined);
+    mocks.revokePlatformUserSessions.mockResolvedValue({ revokedFamilies: 1 });
+    mocks.revokeSession.mockResolvedValue({ currentSessionRevoked: false });
     mocks.setDefaultRulesetVersion.mockResolvedValue(undefined);
+    mocks.setPlatformUserRole.mockResolvedValue({ id: 'user', platformRole: 'ADMIN' });
+    mocks.setPlatformUserStatus.mockResolvedValue({ id: 'user', status: 'SUSPENDED' });
+    mocks.switchOrganization.mockResolvedValue(undefined);
     mocks.triggerReview.mockResolvedValue({ runId: 'run', status: 'ACCEPTED' });
+    mocks.verifyEmail.mockResolvedValue({ organizationId: 'organization' });
   });
 
   it('submits login and invitation acceptance through the real forms', async () => {
@@ -217,5 +289,198 @@ describe('M1 management views', () => {
     wrapper.unmount();
     expect(FakeEventSource.latest?.close).toHaveBeenCalledOnce();
     vi.unstubAllGlobals();
+  });
+
+  it('registers, verifies email, and manages organizations and sessions through live APIs', async () => {
+    const registration = await mountAt(RegisterView, '/register');
+    const registrationInputs = registration.wrapper.findAll('input');
+    await registrationInputs[0]?.setValue('new@example.com');
+    await registrationInputs[1]?.setValue('correct horse battery staple');
+    await registration.wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(mocks.register).toHaveBeenCalledWith('new@example.com', 'correct horse battery staple');
+    expect(registration.wrapper.text()).toContain('可靠投递队列');
+
+    const verification = await mountAt(
+      VerifyEmailView,
+      '/verify-email?token=verification-token-value',
+    );
+    expect(mocks.verifyEmail).toHaveBeenCalledWith('verification-token-value');
+    expect(verification.wrapper.text()).toContain('个人 Organization 已创建');
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const account = await mountAt(AccountView, '/account');
+    expect(account.wrapper.text()).toContain('Second');
+    const buttons = account.wrapper.findAll('button');
+    await buttons.find((button) => button.text() === '切换')?.trigger('click');
+    await flushPromises();
+    expect(mocks.switchOrganization).toHaveBeenCalledWith('second');
+    await buttons.find((button) => button.text() === '撤销')?.trigger('click');
+    await flushPromises();
+    expect(mocks.revokeSession).toHaveBeenCalledWith('session');
+  });
+
+  it('handles registration resend and verification failures without disclosing account state', async () => {
+    const registration = await mountAt(RegisterView, '/register');
+    const inputs = registration.wrapper.findAll('input');
+    await inputs[0]?.setValue('new@example.com');
+    await inputs[1]?.setValue('correct horse battery staple');
+    await registration.wrapper.find('form').trigger('submit');
+    await flushPromises();
+    await registration.wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('重新发送'))
+      ?.trigger('click');
+    await flushPromises();
+    expect(mocks.resendVerification).toHaveBeenCalledWith('new@example.com');
+
+    mocks.register.mockRejectedValueOnce(new Error('registration unavailable'));
+    const failedRegistration = await mountAt(RegisterView, '/register');
+    const failedInputs = failedRegistration.wrapper.findAll('input');
+    await failedInputs[0]?.setValue('other@example.com');
+    await failedInputs[1]?.setValue('another secure password');
+    await failedRegistration.wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(failedRegistration.wrapper.text()).toContain('registration unavailable');
+
+    const incomplete = await mountAt(VerifyEmailView, '/verify-email?token=short');
+    expect(incomplete.wrapper.text()).toContain('验证链接不完整');
+    mocks.verifyEmail.mockRejectedValueOnce(new Error('verification expired'));
+    const expired = await mountAt(
+      VerifyEmailView,
+      '/verify-email?token=expired-verification-token',
+    );
+    expect(expired.wrapper.text()).toContain('verification expired');
+  });
+
+  it('supports complete account-session actions and keeps cancelled mutations local', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { router, wrapper } = await mountAt(AccountView, '/account');
+    const button = (label: string): DOMWrapper<Element> | undefined =>
+      wrapper.findAll('button').find((candidate) => candidate.text() === label);
+
+    await button('撤销')?.trigger('click');
+    expect(mocks.revokeSession).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    mocks.revokeSession.mockResolvedValueOnce({ currentSessionRevoked: true });
+    await button('撤销')?.trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/login');
+
+    const second = await mountAt(AccountView, '/account');
+    const secondButton = (label: string): DOMWrapper<Element> | undefined =>
+      second.wrapper.findAll('button').find((candidate) => candidate.text() === label);
+    await secondButton('退出其他设备')?.trigger('click');
+    await flushPromises();
+    expect(mocks.logoutOtherSessions).toHaveBeenCalledOnce();
+    await secondButton('退出全部设备')?.trigger('click');
+    await flushPromises();
+    expect(mocks.logoutAllSessions).toHaveBeenCalledOnce();
+    expect(second.router.currentRoute.value.path).toBe('/login');
+
+    mocks.listOrganizations.mockRejectedValueOnce(new Error('account unavailable'));
+    const failed = await mountAt(AccountView, '/account');
+    expect(failed.wrapper.text()).toContain('account unavailable');
+  });
+
+  it('surfaces organization-switch and session-revocation failures without losing account state', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mocks.switchOrganization.mockRejectedValueOnce(new Error('switch unavailable'));
+    const account = await mountAt(AccountView, '/account');
+    await account.wrapper
+      .findAll('button')
+      .find((candidate) => candidate.text() === '切换')
+      ?.trigger('click');
+    await flushPromises();
+    expect(account.wrapper.text()).toContain('switch unavailable');
+
+    mocks.revokeSession.mockRejectedValueOnce('provider disconnected');
+    await account.wrapper
+      .findAll('button')
+      .find((candidate) => candidate.text() === '撤销')
+      ?.trigger('click');
+    await flushPromises();
+    expect(account.wrapper.text()).toContain('Session 撤销失败');
+    expect(account.router.currentRoute.value.path).toBe('/account');
+  });
+
+  it('queries platform users and requires a confirmed reason for risky administration', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { wrapper } = await mountAt(AdminUsersView, '/admin/users');
+    expect(wrapper.text()).toContain('user@example.com');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('user@example.com'))
+      ?.trigger('click');
+    await flushPromises();
+    expect(mocks.getPlatformUser).toHaveBeenCalledWith('user');
+    await wrapper.find('input[required]').setValue('Support delegation');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '授予 ADMIN')
+      ?.trigger('click');
+    await flushPromises();
+    expect(mocks.setPlatformUserRole).toHaveBeenCalledWith('user', 'ADMIN', 'Support delegation');
+  });
+
+  it('filters and paginates platform users, while confirming status and session mutations', async () => {
+    mocks.listPlatformUsers.mockResolvedValueOnce({
+      nextCursor: 'next-page',
+      users: [
+        {
+          createdAt: '2026-01-01T00:00:00.000Z',
+          email: 'user@example.com',
+          id: 'user',
+          platformRole: 'USER',
+          status: 'ACTIVE',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { wrapper } = await mountAt(AdminUsersView, '/admin/users');
+    const form = wrapper.find('form');
+    await form.find('input[type="email"]').setValue('USER@example.com');
+    const selects = form.findAll('select');
+    await selects[0]?.setValue('ACTIVE');
+    await selects[1]?.setValue('USER');
+    await form.trigger('submit');
+    await flushPromises();
+    expect(mocks.listPlatformUsers).toHaveBeenLastCalledWith({
+      email: 'USER@example.com',
+      limit: 25,
+      platformRole: 'USER',
+      status: 'ACTIVE',
+    });
+
+    await wrapper
+      .findAll('button')
+      .find((candidate) => candidate.text().includes('user@example.com'))
+      ?.trigger('click');
+    await flushPromises();
+    await wrapper.find('input[required]').setValue('Security response');
+    await wrapper
+      .findAll('button')
+      .find((candidate) => candidate.text() === '停用账户')
+      ?.trigger('click');
+    await flushPromises();
+    expect(mocks.setPlatformUserStatus).toHaveBeenCalledWith(
+      'user',
+      'SUSPENDED',
+      'Security response',
+    );
+    await wrapper
+      .findAll('button')
+      .find((candidate) => candidate.text() === '撤销全部 Session')
+      ?.trigger('click');
+    await flushPromises();
+    expect(mocks.revokePlatformUserSessions).toHaveBeenCalledWith('user', 'Security response');
+
+    confirm.mockReturnValue(false);
+    await wrapper
+      .findAll('button')
+      .find((candidate) => candidate.text() === '恢复账户')
+      ?.trigger('click');
+    expect(mocks.setPlatformUserStatus).toHaveBeenCalledTimes(1);
   });
 });

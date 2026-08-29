@@ -131,4 +131,57 @@ describe('API client', () => {
     );
     await expect(client.getCapability('/reviews')).rejects.toThrow('unexpectedly succeeded');
   });
+
+  it('maps public identity, session, organization, and platform-administration endpoints', async () => {
+    document.cookie = 'iw_csrf=csrf-value';
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const body = url.includes('/verify-email')
+        ? { organizationId: 'organization' }
+        : url.endsWith('/me/organizations')
+          ? { organizations: [{ id: 'organization' }] }
+          : url.endsWith('/auth/sessions')
+            ? { sessions: [{ sessionId: 'session' }] }
+            : url.includes('/admin/users/user') && !url.includes('revoke-sessions')
+              ? { user: { id: 'user' } }
+              : url.includes('/admin/users')
+                ? { users: [{ id: 'user' }] }
+                : url.includes('/auth/logout') || url.includes('/revoke-sessions')
+                  ? { revokedFamilies: 1 }
+                  : url.includes('/auth/sessions/')
+                    ? { currentSessionRevoked: false }
+                    : { accepted: true };
+      return Promise.resolve(
+        new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }),
+      );
+    });
+    const client = createApiClient(fetchImplementation, '/api/v1');
+
+    await client.register('user@example.com', 'another secure password');
+    await client.resendVerification('user@example.com');
+    await expect(client.verifyEmail('verification-token')).resolves.toEqual({
+      organizationId: 'organization',
+    });
+    await expect(client.listOrganizations()).resolves.toHaveLength(1);
+    await client.switchOrganization('organization');
+    await expect(client.listSessions()).resolves.toHaveLength(1);
+    await client.revokeSession('session');
+    await client.logoutOtherSessions();
+    await client.logoutAllSessions();
+    await expect(
+      client.listPlatformUsers({ limit: 25, platformRole: 'USER', status: 'ACTIVE' }),
+    ).resolves.toMatchObject({ users: [{ id: 'user' }] });
+    await expect(client.getPlatformUser('user')).resolves.toEqual({ id: 'user' });
+    await client.setPlatformUserStatus('user', 'SUSPENDED', 'Security response');
+    await client.setPlatformUserRole('user', 'ADMIN', 'Support delegation');
+    await client.revokePlatformUserSessions('user', 'Security response');
+
+    expect(fetchImplementation.mock.calls.map((call) => call[0])).toContain(
+      '/api/v1/admin/users?limit=25&platformRole=USER&status=ACTIVE',
+    );
+    expect(
+      new Headers(fetchImplementation.mock.calls.at(-1)?.[1]?.headers).get('x-csrf-token'),
+    ).toBe('csrf-value');
+  });
 });

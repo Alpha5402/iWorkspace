@@ -142,6 +142,19 @@ button:disabled {
   gap: 14px;
 }
 
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+button.list-row {
+  width: 100%;
+  color: #34405a;
+  text-align: left;
+  background: #fff;
+}
+
 .two-column,
 .grid-list {
   display: grid;

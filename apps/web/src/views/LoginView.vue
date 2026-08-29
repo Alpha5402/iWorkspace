@@ -26,7 +26,7 @@ async function submit(): Promise<void> {
 
 <template>
   <section class="panel narrow-panel">
-    <p class="eyebrow">Closed registration</p>
+    <p class="eyebrow">JWT access + refresh session</p>
     <h1>登录 iWorkspace</h1>
     <form class="form-stack" @submit.prevent="submit">
       <label>邮箱<input v-model="email" type="email" autocomplete="username" required /></label>
@@ -39,6 +39,7 @@ async function submit(): Promise<void> {
           required
       /></label>
       <button :disabled="submitting" type="submit">{{ submitting ? '登录中…' : '登录' }}</button>
+      <RouterLink to="/register">没有账户？公开注册</RouterLink>
       <p v-if="error" class="error-text" role="alert">{{ error }}</p>
     </form>
   </section>

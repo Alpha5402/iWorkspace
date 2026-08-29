@@ -10,7 +10,7 @@ export type JsonObject = JSONColumnType<
 export type JsonArray = JSONColumnType<readonly unknown[]>;
 
 export interface UsersTable {
-  created_at: Generated<Timestamp>;
+  created_at: Timestamp;
   email: string;
   email_canonical: Generated<string>;
   id: GeneratedId;
@@ -111,10 +111,12 @@ export interface InvitationsTable {
 }
 
 export interface RefreshSessionsTable {
-  created_at: Generated<Timestamp>;
+  created_at: Timestamp;
   expires_at: Timestamp;
   family_id: string;
   id: GeneratedId;
+  ip_address: string | null;
+  last_seen_at: Timestamp;
   organization_id: string;
   replaced_by: string | null;
   revoked_at: Timestamp | null;
@@ -122,6 +124,7 @@ export interface RefreshSessionsTable {
   token_jti: string;
   token_hash: string;
   used_at: Timestamp | null;
+  user_agent: string | null;
   user_id: string;
 }
 

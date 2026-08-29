@@ -10,6 +10,9 @@ import { capabilities } from '@delivery/contracts';
     </header>
     <aside class="sidebar" aria-label="能力导航">
       <RouterLink to="/login">登录</RouterLink>
+      <RouterLink to="/register">注册</RouterLink>
+      <RouterLink to="/account">组织与设备</RouterLink>
+      <RouterLink to="/admin/users">用户管理</RouterLink>
       <RouterLink to="/projects">项目与审查</RouterLink>
       <RouterLink
         v-for="capability in capabilities.filter((entry) => entry.plannedPhase !== 'M1')"

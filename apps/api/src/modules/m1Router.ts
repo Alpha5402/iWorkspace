@@ -16,6 +16,7 @@ import {
   type SessionBundle,
   type UserActor,
 } from '../application/authService.js';
+import { type AdminService } from '../application/adminService.js';
 import {
   type ControlPlaneService,
   type ProjectTokenActor,
@@ -34,6 +35,14 @@ const RegistrationSchema = z.object({
   email: z.email(),
   password: z.string().min(12),
 });
+const AdminUserListQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  email: z.email().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  platformRole: z.enum(['SUPER_ADMIN', 'ADMIN', 'USER']).optional(),
+  status: z.enum(['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED']).optional(),
+});
+const ReasonSchema = z.string().trim().min(3).max(500);
 const ProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
@@ -104,9 +113,23 @@ function verifyGitHubState(state: string, userId: string, secret: string): strin
 }
 
 export type M1Runtime = Readonly<{
+  admin: Pick<
+    AdminService,
+    'getUser' | 'listUsers' | 'revokeUserSessions' | 'setPlatformRole' | 'setUserStatus'
+  >;
   auth: Pick<
     AuthService,
-    'acceptInvitation' | 'login' | 'logout' | 'refresh' | 'verifyAccessToken'
+    | 'acceptInvitation'
+    | 'listOrganizations'
+    | 'listSessions'
+    | 'login'
+    | 'logout'
+    | 'logoutAllSessions'
+    | 'logoutOtherSessions'
+    | 'refresh'
+    | 'revokeSession'
+    | 'switchOrganization'
+    | 'verifyAccessToken'
   >;
   controlPlane: Pick<
     ControlPlaneService,
@@ -238,6 +261,14 @@ const asyncRoute =
     void handler(request, response).catch(next);
   };
 
+function sessionMetadata(request: Request): Readonly<{ ipAddress: string; userAgent?: string }> {
+  const userAgent = request.header('user-agent');
+  return {
+    ipAddress: request.ip ?? request.socket.remoteAddress ?? 'unknown',
+    ...(userAgent === undefined ? {} : { userAgent }),
+  };
+}
+
 export function createM1Router(runtime: M1Runtime): Router {
   const router = Router();
 
@@ -305,7 +336,7 @@ export function createM1Router(runtime: M1Runtime): Router {
       const payload = RegistrationSchema.parse(request.body);
       const result = await runtime.registration.register({
         ...payload,
-        ipAddress: request.ip ?? request.socket.remoteAddress ?? 'unknown',
+        ipAddress: sessionMetadata(request).ipAddress,
       });
       response.status(202).json(result);
     }),
@@ -325,7 +356,7 @@ export function createM1Router(runtime: M1Runtime): Router {
       const payload = z.object({ email: z.email() }).parse(request.body);
       const result = await runtime.registration.resendVerification({
         email: payload.email,
-        ipAddress: request.ip ?? request.socket.remoteAddress ?? 'unknown',
+        ipAddress: sessionMetadata(request).ipAddress,
       });
       response.status(202).json(result);
     }),
@@ -336,7 +367,7 @@ export function createM1Router(runtime: M1Runtime): Router {
     asyncRoute(async (request, response) => {
       const session = await runtime.auth.login({
         ...LoginSchema.parse(request.body),
-        ipAddress: request.ip ?? request.socket.remoteAddress ?? 'unknown',
+        ...sessionMetadata(request),
       });
       setSessionCookies(response, session, runtime.secureCookies);
       response.status(200).json({ user: session.user });
@@ -424,7 +455,7 @@ export function createM1Router(runtime: M1Runtime): Router {
       if (refreshToken === undefined) {
         throw new HttpError(401, 'REFRESH_TOKEN_REQUIRED', 'Refresh token is required.');
       }
-      const session = await runtime.auth.refresh(refreshToken);
+      const session = await runtime.auth.refresh(refreshToken, sessionMetadata(request));
       setSessionCookies(response, session, runtime.secureCookies);
       response.status(200).json({ user: session.user });
     }),
@@ -445,6 +476,154 @@ export function createM1Router(runtime: M1Runtime): Router {
     asyncRoute(async (request, response) => {
       const actor = await requireUser(request, runtime);
       response.status(200).json({ actor });
+    }),
+  );
+
+  router.get(
+    '/me/organizations',
+    asyncRoute(async (request, response) => {
+      response.status(200).json({
+        organizations: await runtime.auth.listOrganizations(await requireUser(request, runtime)),
+      });
+    }),
+  );
+
+  router.post(
+    '/auth/switch-organization',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const payload = z.object({ organizationId: z.uuid() }).parse(request.body);
+      const session = await runtime.auth.switchOrganization(
+        await requireUser(request, runtime),
+        payload.organizationId,
+        sessionMetadata(request),
+      );
+      setSessionCookies(response, session, runtime.secureCookies);
+      response.status(200).json({ user: session.user });
+    }),
+  );
+
+  router.get(
+    '/auth/sessions',
+    asyncRoute(async (request, response) => {
+      response.status(200).json({
+        sessions: await runtime.auth.listSessions(await requireUser(request, runtime)),
+      });
+    }),
+  );
+
+  router.delete(
+    '/auth/sessions/:sessionId',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const result = await runtime.auth.revokeSession(
+        await requireUser(request, runtime),
+        z.uuid().parse(request.params.sessionId),
+      );
+      if (result.currentSessionRevoked) clearSessionCookies(response, runtime.secureCookies);
+      response.status(200).json(result);
+    }),
+  );
+
+  router.post(
+    '/auth/logout-others',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      response
+        .status(200)
+        .json(await runtime.auth.logoutOtherSessions(await requireUser(request, runtime)));
+    }),
+  );
+
+  router.post(
+    '/auth/logout-all',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const result = await runtime.auth.logoutAllSessions(await requireUser(request, runtime));
+      clearSessionCookies(response, runtime.secureCookies);
+      response.status(200).json(result);
+    }),
+  );
+
+  router.get(
+    '/admin/users',
+    asyncRoute(async (request, response) => {
+      response
+        .status(200)
+        .json(
+          await runtime.admin.listUsers(
+            await requireUser(request, runtime),
+            AdminUserListQuerySchema.parse(request.query),
+          ),
+        );
+    }),
+  );
+
+  router.get(
+    '/admin/users/:userId',
+    asyncRoute(async (request, response) => {
+      response.status(200).json({
+        user: await runtime.admin.getUser(
+          await requireUser(request, runtime),
+          z.uuid().parse(request.params.userId),
+        ),
+      });
+    }),
+  );
+
+  router.patch(
+    '/admin/users/:userId/status',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const payload = z
+        .object({ reason: ReasonSchema, status: z.enum(['ACTIVE', 'SUSPENDED']) })
+        .parse(request.body);
+      response.status(200).json({
+        user: await runtime.admin.setUserStatus(
+          await requireUser(request, runtime),
+          z.uuid().parse(request.params.userId),
+          payload.status,
+          payload.reason,
+          getResponseTraceId(response.locals),
+        ),
+      });
+    }),
+  );
+
+  router.patch(
+    '/admin/users/:userId/platform-role',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const payload = z
+        .object({ reason: ReasonSchema, role: z.enum(['ADMIN', 'USER']) })
+        .parse(request.body);
+      response.status(200).json({
+        user: await runtime.admin.setPlatformRole(
+          await requireUser(request, runtime),
+          z.uuid().parse(request.params.userId),
+          payload.role,
+          payload.reason,
+          getResponseTraceId(response.locals),
+        ),
+      });
+    }),
+  );
+
+  router.post(
+    '/admin/users/:userId/revoke-sessions',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const payload = z.object({ reason: ReasonSchema }).parse(request.body);
+      response
+        .status(200)
+        .json(
+          await runtime.admin.revokeUserSessions(
+            await requireUser(request, runtime),
+            z.uuid().parse(request.params.userId),
+            payload.reason,
+            getResponseTraceId(response.locals),
+          ),
+        );
     }),
   );
 

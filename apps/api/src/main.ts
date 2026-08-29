@@ -1,4 +1,8 @@
-import { createDatabase, createPostgresProbe } from '@delivery/database';
+import {
+  createDatabase,
+  createPlatformAdminDatabase,
+  createPostgresProbe,
+} from '@delivery/database';
 import { createReadinessProbe } from '@delivery/health';
 import { createRabbitMqProbe } from '@delivery/messaging';
 import { createObjectStorageProbe, ImmutableArtifactStore } from '@delivery/object-storage';
@@ -7,6 +11,7 @@ import { AccessTokenService, RefreshTokenService } from '@delivery/security';
 import { GitHubAppProvider } from '@delivery/providers-github';
 
 import { AuthService } from './application/authService.js';
+import { AdminService } from './application/adminService.js';
 import { ControlPlaneService } from './application/controlPlaneService.js';
 import { PublicAuthRateLimiter } from './application/publicAuthRateLimiter.js';
 import { RegistrationService } from './application/registrationService.js';
@@ -22,6 +27,8 @@ const readinessProbe = createReadinessProbe([
   createObjectStorageProbe(config.objectStorage),
 ]);
 const database = config.m1 === undefined ? undefined : createDatabase(config.databaseUrl);
+const platformAdminDatabase =
+  config.m1 === undefined ? undefined : createPlatformAdminDatabase(config.databaseUrl);
 const artifactStore =
   config.m1 === undefined ? undefined : new ImmutableArtifactStore(config.objectStorage);
 const publicAuthRateLimiter =
@@ -32,9 +39,11 @@ const m1Runtime =
   config.m1 === undefined ||
   database === undefined ||
   artifactStore === undefined ||
+  platformAdminDatabase === undefined ||
   publicAuthRateLimiter === undefined
     ? undefined
     : {
+        admin: new AdminService(platformAdminDatabase),
         auth: new AuthService(
           database,
           new AccessTokenService(config.m1.authAccessKeys, 'iworkspace', 'iworkspace-access'),
@@ -78,6 +87,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   logger.info({ signal }, 'api shutting down');
   server.close();
   await database?.destroy();
+  await platformAdminDatabase?.destroy();
   artifactStore?.close();
   await readinessProbe.close();
   await telemetry.shutdown();

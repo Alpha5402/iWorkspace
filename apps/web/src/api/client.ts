@@ -20,8 +20,47 @@ export type ReviewSummary = Readonly<{
   pullRequestNumber: number;
   status: string;
 }>;
+export type OrganizationSummary = Readonly<{
+  current: boolean;
+  id: string;
+  name: string;
+  role: 'OWNER' | 'ADMIN' | 'MEMBER';
+}>;
+export type SessionSummary = Readonly<{
+  active: boolean;
+  createdAt: string;
+  current: boolean;
+  expiresAt: string;
+  familyId: string;
+  ipAddress?: string;
+  lastSeenAt: string;
+  organizationId: string;
+  sessionId: string;
+  signingKeyId: string;
+  userAgent?: string;
+}>;
+export type PlatformUserSummary = Readonly<{
+  createdAt: string;
+  email: string;
+  id: string;
+  platformRole: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
+  status: 'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED';
+  updatedAt: string;
+}>;
+export type PlatformUserDetail = PlatformUserSummary &
+  Readonly<{
+    memberships: readonly Readonly<{
+      organizationId: string;
+      organizationName: string;
+      role: 'OWNER' | 'ADMIN' | 'MEMBER';
+    }>[];
+    sessions: readonly SessionSummary[];
+  }>;
 
 export type ApiClient = Readonly<{
+  register(email: string, password: string): Promise<void>;
+  resendVerification(email: string): Promise<void>;
+  verifyEmail(token: string): Promise<Readonly<{ organizationId: string }>>;
   createProject(input: Readonly<{ name: string; slug: string }>): Promise<ProjectSummary>;
   createRepositoryConnection(projectId: string, input: Record<string, unknown>): Promise<void>;
   createRuleset(
@@ -48,6 +87,36 @@ export type ApiClient = Readonly<{
   listReviews(projectId: string): Promise<readonly ReviewSummary[]>;
   listRulesets(projectId: string): Promise<readonly Readonly<Record<string, unknown>>[]>;
   listTokens(projectId: string): Promise<readonly Readonly<Record<string, unknown>>[]>;
+  listOrganizations(): Promise<readonly OrganizationSummary[]>;
+  listSessions(): Promise<readonly SessionSummary[]>;
+  switchOrganization(organizationId: string): Promise<void>;
+  revokeSession(sessionId: string): Promise<Readonly<{ currentSessionRevoked: boolean }>>;
+  logoutOtherSessions(): Promise<Readonly<{ revokedFamilies: number }>>;
+  logoutAllSessions(): Promise<Readonly<{ revokedFamilies: number }>>;
+  listPlatformUsers(
+    input?: Readonly<{
+      cursor?: string;
+      email?: string;
+      limit?: number;
+      platformRole?: PlatformUserSummary['platformRole'];
+      status?: PlatformUserSummary['status'];
+    }>,
+  ): Promise<Readonly<{ nextCursor?: string; users: readonly PlatformUserSummary[] }>>;
+  getPlatformUser(userId: string): Promise<PlatformUserDetail>;
+  setPlatformUserStatus(
+    userId: string,
+    status: 'ACTIVE' | 'SUSPENDED',
+    reason: string,
+  ): Promise<PlatformUserSummary>;
+  setPlatformUserRole(
+    userId: string,
+    role: 'ADMIN' | 'USER',
+    reason: string,
+  ): Promise<PlatformUserSummary>;
+  revokePlatformUserSessions(
+    userId: string,
+    reason: string,
+  ): Promise<Readonly<{ revokedFamilies: number }>>;
   login(email: string, password: string): Promise<void>;
   logout(): Promise<void>;
   publishRuleset(projectId: string, versionId: string): Promise<void>;
@@ -95,6 +164,24 @@ export function createApiClient(
   };
 
   return {
+    async register(email, password) {
+      await request('/auth/register', {
+        body: JSON.stringify({ email, password }),
+        method: 'POST',
+      });
+    },
+    async resendVerification(email) {
+      await request('/auth/resend-verification', {
+        body: JSON.stringify({ email }),
+        method: 'POST',
+      });
+    },
+    async verifyEmail(token) {
+      return request('/auth/verify-email', {
+        body: JSON.stringify({ token }),
+        method: 'POST',
+      });
+    },
     async acceptInvitation(token, password) {
       await request('/invitations/accept', {
         body: JSON.stringify({ password, token }),
@@ -202,6 +289,63 @@ export function createApiClient(
           `/projects/${projectId}/tokens`,
         )
       ).tokens;
+    },
+    async listOrganizations() {
+      return (await request<{ organizations: readonly OrganizationSummary[] }>('/me/organizations'))
+        .organizations;
+    },
+    async listSessions() {
+      return (await request<{ sessions: readonly SessionSummary[] }>('/auth/sessions')).sessions;
+    },
+    async switchOrganization(organizationId) {
+      await request('/auth/switch-organization', {
+        body: JSON.stringify({ organizationId }),
+        method: 'POST',
+      });
+    },
+    async revokeSession(sessionId) {
+      return request(`/auth/sessions/${sessionId}`, { method: 'DELETE' });
+    },
+    async logoutOtherSessions() {
+      return request('/auth/logout-others', { method: 'POST' });
+    },
+    async logoutAllSessions() {
+      return request('/auth/logout-all', { method: 'POST' });
+    },
+    async listPlatformUsers(input = {}) {
+      const query = new URLSearchParams();
+      if (input.cursor !== undefined) query.set('cursor', input.cursor);
+      if (input.email !== undefined) query.set('email', input.email);
+      if (input.limit !== undefined) query.set('limit', String(input.limit));
+      if (input.platformRole !== undefined) query.set('platformRole', input.platformRole);
+      if (input.status !== undefined) query.set('status', input.status);
+      const suffix = query.size === 0 ? '' : `?${query.toString()}`;
+      return request(`/admin/users${suffix}`);
+    },
+    async getPlatformUser(userId) {
+      return (await request<{ user: PlatformUserDetail }>(`/admin/users/${userId}`)).user;
+    },
+    async setPlatformUserStatus(userId, status, reason) {
+      return (
+        await request<{ user: PlatformUserSummary }>(`/admin/users/${userId}/status`, {
+          body: JSON.stringify({ reason, status }),
+          method: 'PATCH',
+        })
+      ).user;
+    },
+    async setPlatformUserRole(userId, role, reason) {
+      return (
+        await request<{ user: PlatformUserSummary }>(`/admin/users/${userId}/platform-role`, {
+          body: JSON.stringify({ reason, role }),
+          method: 'PATCH',
+        })
+      ).user;
+    },
+    async revokePlatformUserSessions(userId, reason) {
+      return request(`/admin/users/${userId}/revoke-sessions`, {
+        body: JSON.stringify({ reason }),
+        method: 'POST',
+      });
     },
     async login(email, password) {
       await request('/auth/login', { body: JSON.stringify({ email, password }), method: 'POST' });

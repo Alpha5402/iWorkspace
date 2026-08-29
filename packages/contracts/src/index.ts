@@ -196,6 +196,83 @@ export function createOpenApiDocument(m1Enabled = false): OpenApiDocument {
           tags: ['identity'],
         },
       },
+      '/api/v1/auth/logout-all': {
+        post: {
+          operationId: 'logoutAllSessions',
+          responses: { 200: { description: 'All session families revoked' } },
+          tags: ['identity'],
+        },
+      },
+      '/api/v1/auth/logout-others': {
+        post: {
+          operationId: 'logoutOtherSessions',
+          responses: { 200: { description: 'Other session families revoked' } },
+          tags: ['identity'],
+        },
+      },
+      '/api/v1/auth/sessions': {
+        get: {
+          operationId: 'listSessions',
+          responses: { 200: { description: 'Session family summaries' } },
+          tags: ['identity'],
+        },
+      },
+      '/api/v1/auth/sessions/{sessionId}': {
+        delete: {
+          operationId: 'revokeSession',
+          responses: { 200: { description: 'Session family revoked' } },
+          tags: ['identity'],
+        },
+      },
+      '/api/v1/auth/switch-organization': {
+        post: {
+          operationId: 'switchOrganization',
+          responses: { 200: { description: 'Organization-bound session rotated' } },
+          tags: ['identity'],
+        },
+      },
+      '/api/v1/me/organizations': {
+        get: {
+          operationId: 'listMyOrganizations',
+          responses: { 200: { description: 'Accessible organizations' } },
+          tags: ['identity'],
+        },
+      },
+      '/api/v1/admin/users': {
+        get: {
+          operationId: 'listPlatformUsers',
+          responses: { 200: { description: 'Bounded platform-user page' } },
+          tags: ['platform-admin'],
+        },
+      },
+      '/api/v1/admin/users/{userId}': {
+        get: {
+          operationId: 'getPlatformUser',
+          responses: { 200: { description: 'Platform-user detail' } },
+          tags: ['platform-admin'],
+        },
+      },
+      '/api/v1/admin/users/{userId}/platform-role': {
+        patch: {
+          operationId: 'setPlatformUserRole',
+          responses: { 200: { description: 'Platform role updated' } },
+          tags: ['platform-admin'],
+        },
+      },
+      '/api/v1/admin/users/{userId}/revoke-sessions': {
+        post: {
+          operationId: 'revokePlatformUserSessions',
+          responses: { 200: { description: 'User session families revoked' } },
+          tags: ['platform-admin'],
+        },
+      },
+      '/api/v1/admin/users/{userId}/status': {
+        patch: {
+          operationId: 'setPlatformUserStatus',
+          responses: { 200: { description: 'Platform-user status updated' } },
+          tags: ['platform-admin'],
+        },
+      },
       '/api/v1/auth/refresh': {
         post: {
           operationId: 'refreshSession',

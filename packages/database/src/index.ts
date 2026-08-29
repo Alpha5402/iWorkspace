@@ -55,6 +55,22 @@ export function createDatabase(connectionString: string, maxConnections = 20): D
   });
 }
 
+export function createPlatformAdminDatabase(
+  connectionString: string,
+  maxConnections = 5,
+): DeliveryDatabase {
+  return new Kysely<DatabaseSchema>({
+    dialect: new PostgresDialect({
+      pool: new pg.Pool({
+        connectionString,
+        connectionTimeoutMillis: 5_000,
+        max: maxConnections,
+        options: '-c role=iw_platform_admin',
+      }),
+    }),
+  });
+}
+
 export async function withTenant<T>(
   database: DeliveryDatabase,
   organizationId: string,
@@ -71,6 +87,14 @@ export async function setTenantContext(
   organizationId: string,
 ): Promise<void> {
   await sql`select set_config('app.organization_id', ${organizationId}, true)`.execute(transaction);
+}
+
+export async function acquirePlatformAdminMutationLock(
+  transaction: DeliveryTransaction,
+): Promise<void> {
+  await sql`select pg_advisory_xact_lock(hashtextextended('iworkspace:platform-admin', 0))`.execute(
+    transaction,
+  );
 }
 
 export type OutboxEventInput = Readonly<{

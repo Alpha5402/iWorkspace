@@ -1,6 +1,10 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 
-import { type DeliveryDatabase } from '@delivery/database';
+import {
+  type DeliveryDatabase,
+  type DeliveryTransaction,
+  getDatabaseNow,
+} from '@delivery/database';
 import {
   type AccessTokenService,
   hashOpaqueToken,
@@ -12,6 +16,7 @@ import {
 
 import { HttpError } from '../errors.js';
 import { type PublicAuthRateLimiter } from './publicAuthRateLimiter.js';
+import { summarizeSessionFamilies, type SessionSummary } from './sessionSummaries.js';
 
 export type UserActor = Readonly<{
   organizationId: string;
@@ -26,6 +31,8 @@ export type SessionBundle = Readonly<{
   refreshToken: string;
   user: Readonly<{ email: string; id: string; organizationId: string; organizationRole: string }>;
 }>;
+
+export type SessionMetadata = Readonly<{ ipAddress?: string; userAgent?: string }>;
 
 const REFRESH_TTL_MILLISECONDS = 30 * 24 * 60 * 60 * 1_000;
 
@@ -44,6 +51,7 @@ export class AuthService {
       ipAddress: string;
       organizationId?: string | undefined;
       password: string;
+      userAgent?: string;
     }>,
   ): Promise<SessionBundle> {
     await this.rateLimiter.consume({
@@ -85,15 +93,21 @@ export class AuthService {
         'No accessible organization was found.',
       );
     }
-    return this.createSession({
-      email: credential.email,
-      organizationId: membership.organization_id,
-      organizationRole: membership.role,
-      userId: credential.id,
-    });
+    return this.createSession(
+      {
+        email: credential.email,
+        organizationId: membership.organization_id,
+        organizationRole: membership.role,
+        userId: credential.id,
+      },
+      input,
+    );
   }
 
-  public async refresh(refreshToken: string): Promise<SessionBundle> {
+  public async refresh(
+    refreshToken: string,
+    metadata: SessionMetadata = {},
+  ): Promise<SessionBundle> {
     let claims: RefreshTokenClaims;
     try {
       claims = await this.refreshTokens.verify(refreshToken);
@@ -139,10 +153,11 @@ export class AuthService {
       ) {
         throw new HttpError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token is invalid.');
       }
+      const databaseNow = await getDatabaseNow(transaction);
       if (session.used_at !== null) {
         await transaction
           .updateTable('refresh_sessions')
-          .set({ revoked_at: new Date() })
+          .set({ revoked_at: databaseNow })
           .where('family_id', '=', session.family_id)
           .where('revoked_at', 'is', null)
           .execute();
@@ -150,14 +165,14 @@ export class AuthService {
       }
       if (
         session.revoked_at !== null ||
-        session.expires_at <= new Date() ||
+        session.expires_at <= databaseNow ||
         session.status !== 'ACTIVE'
       ) {
         throw new HttpError(401, 'REFRESH_TOKEN_EXPIRED', 'Refresh token is no longer active.');
       }
       const nextSessionId = randomUUID();
       const nextTokenJti = randomUUID();
-      const issuedAt = new Date();
+      const issuedAt = databaseNow;
       const expiresAt = new Date(issuedAt.getTime() + REFRESH_TTL_MILLISECONDS);
       const nextRefreshToken = await this.refreshTokens.issue(
         {
@@ -175,6 +190,7 @@ export class AuthService {
           expires_at: expiresAt,
           family_id: session.family_id,
           id: nextSessionId,
+          ...sessionMetadataColumns(metadata, databaseNow),
           organization_id: session.organization_id,
           replaced_by: null,
           revoked_at: null,
@@ -187,7 +203,7 @@ export class AuthService {
         .executeTakeFirstOrThrow();
       await transaction
         .updateTable('refresh_sessions')
-        .set({ replaced_by: nextSessionId, used_at: new Date() })
+        .set({ last_seen_at: databaseNow, replaced_by: nextSessionId, used_at: databaseNow })
         .where('id', '=', session.id)
         .executeTakeFirstOrThrow();
       return {
@@ -230,6 +246,199 @@ export class AuthService {
       .where('family_id', '=', session.family_id)
       .where('revoked_at', 'is', null)
       .execute();
+  }
+
+  public async listOrganizations(actor: UserActor): Promise<
+    readonly Readonly<{
+      current: boolean;
+      id: string;
+      name: string;
+      role: 'OWNER' | 'ADMIN' | 'MEMBER';
+    }>[]
+  > {
+    const memberships = await this.database
+      .selectFrom('organization_members')
+      .innerJoin('organizations', 'organizations.id', 'organization_members.organization_id')
+      .select([
+        'organization_members.organization_id',
+        'organization_members.role',
+        'organizations.name',
+      ])
+      .where('organization_members.user_id', '=', actor.userId)
+      .orderBy('organization_members.created_at', 'asc')
+      .orderBy('organization_members.organization_id', 'asc')
+      .execute();
+    return memberships.map((membership) => ({
+      current: membership.organization_id === actor.organizationId,
+      id: membership.organization_id,
+      name: membership.name,
+      role: membership.role,
+    }));
+  }
+
+  public async switchOrganization(
+    actor: UserActor,
+    organizationId: string,
+    metadata: SessionMetadata,
+  ): Promise<SessionBundle> {
+    return this.database.transaction().execute(async (transaction) => {
+      const membership = await transaction
+        .selectFrom('organization_members')
+        .innerJoin('organizations', 'organizations.id', 'organization_members.organization_id')
+        .innerJoin('users', 'users.id', 'organization_members.user_id')
+        .select(['organization_members.role', 'organizations.name', 'users.email', 'users.status'])
+        .where('organization_members.user_id', '=', actor.userId)
+        .where('organization_members.organization_id', '=', organizationId)
+        .forShare()
+        .executeTakeFirst();
+      if (membership === undefined || membership.status !== 'ACTIVE') {
+        throw new HttpError(
+          403,
+          'ORGANIZATION_ACCESS_DENIED',
+          'The selected organization is not accessible.',
+        );
+      }
+      const currentSession = await transaction
+        .selectFrom('refresh_sessions')
+        .select('family_id')
+        .where('id', '=', actor.sessionId)
+        .where('user_id', '=', actor.userId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (currentSession === undefined) {
+        throw new HttpError(401, 'ACCESS_SESSION_INACTIVE', 'Access session is no longer active.');
+      }
+      const databaseNow = await getDatabaseNow(transaction);
+      await transaction
+        .updateTable('refresh_sessions')
+        .set({ revoked_at: databaseNow })
+        .where('family_id', '=', currentSession.family_id)
+        .where('revoked_at', 'is', null)
+        .execute();
+      return this.createSession(
+        {
+          email: membership.email,
+          organizationId,
+          organizationRole: membership.role,
+          userId: actor.userId,
+        },
+        metadata,
+        transaction,
+        databaseNow,
+      );
+    });
+  }
+
+  public async listSessions(actor: UserActor): Promise<readonly SessionSummary[]> {
+    const [rows, databaseNow] = await Promise.all([
+      this.database
+        .selectFrom('refresh_sessions')
+        .select([
+          'created_at',
+          'expires_at',
+          'family_id',
+          'id',
+          'ip_address',
+          'last_seen_at',
+          'organization_id',
+          'replaced_by',
+          'revoked_at',
+          'signing_key_id',
+          'used_at',
+          'user_agent',
+        ])
+        .where('user_id', '=', actor.userId)
+        .orderBy('created_at', 'desc')
+        .execute(),
+      getDatabaseNow(this.database),
+    ]);
+    return summarizeSessionFamilies(rows, databaseNow, actor.sessionId);
+  }
+
+  public async revokeSession(
+    actor: UserActor,
+    sessionId: string,
+  ): Promise<Readonly<{ currentSessionRevoked: boolean }>> {
+    return this.database.transaction().execute(async (transaction) => {
+      const session = await transaction
+        .selectFrom('refresh_sessions')
+        .select('family_id')
+        .where('id', '=', sessionId)
+        .where('user_id', '=', actor.userId)
+        .executeTakeFirst();
+      if (session === undefined) {
+        throw new HttpError(404, 'SESSION_NOT_FOUND', 'Session was not found.');
+      }
+      const databaseNow = await getDatabaseNow(transaction);
+      await transaction
+        .updateTable('refresh_sessions')
+        .set({ revoked_at: databaseNow })
+        .where('family_id', '=', session.family_id)
+        .where('revoked_at', 'is', null)
+        .execute();
+      const current = await transaction
+        .selectFrom('refresh_sessions')
+        .select('id')
+        .where('family_id', '=', session.family_id)
+        .where('id', '=', actor.sessionId)
+        .executeTakeFirst();
+      return { currentSessionRevoked: current !== undefined };
+    });
+  }
+
+  public async logoutOtherSessions(
+    actor: UserActor,
+  ): Promise<Readonly<{ revokedFamilies: number }>> {
+    return this.database.transaction().execute(async (transaction) => {
+      const current = await transaction
+        .selectFrom('refresh_sessions')
+        .select('family_id')
+        .where('id', '=', actor.sessionId)
+        .where('user_id', '=', actor.userId)
+        .executeTakeFirst();
+      if (current === undefined) {
+        throw new HttpError(401, 'ACCESS_SESSION_INACTIVE', 'Access session is no longer active.');
+      }
+      const families = await transaction
+        .selectFrom('refresh_sessions')
+        .select('family_id')
+        .distinct()
+        .where('user_id', '=', actor.userId)
+        .where('family_id', '!=', current.family_id)
+        .where('revoked_at', 'is', null)
+        .execute();
+      if (families.length > 0) {
+        await transaction
+          .updateTable('refresh_sessions')
+          .set({ revoked_at: await getDatabaseNow(transaction) })
+          .where('user_id', '=', actor.userId)
+          .where('family_id', '!=', current.family_id)
+          .where('revoked_at', 'is', null)
+          .execute();
+      }
+      return { revokedFamilies: families.length };
+    });
+  }
+
+  public async logoutAllSessions(actor: UserActor): Promise<Readonly<{ revokedFamilies: number }>> {
+    return this.database.transaction().execute(async (transaction) => {
+      const families = await transaction
+        .selectFrom('refresh_sessions')
+        .select('family_id')
+        .distinct()
+        .where('user_id', '=', actor.userId)
+        .where('revoked_at', 'is', null)
+        .execute();
+      if (families.length > 0) {
+        await transaction
+          .updateTable('refresh_sessions')
+          .set({ revoked_at: await getDatabaseNow(transaction) })
+          .where('user_id', '=', actor.userId)
+          .where('revoked_at', 'is', null)
+          .execute();
+      }
+      return { revokedFamilies: families.length };
+    });
   }
 
   public async acceptInvitation(
@@ -331,11 +540,13 @@ export class AuthService {
       organizationRole: string;
       userId: string;
     }>,
+    metadata: SessionMetadata = {},
+    executor: DeliveryDatabase | DeliveryTransaction = this.database,
+    issuedAt = new Date(),
   ): Promise<SessionBundle> {
     const sessionId = randomUUID();
     const familyId = randomUUID();
     const tokenJti = randomUUID();
-    const issuedAt = new Date();
     const refreshToken = await this.refreshTokens.issue(
       {
         familyId,
@@ -346,12 +557,13 @@ export class AuthService {
       },
       issuedAt,
     );
-    await this.database
+    await executor
       .insertInto('refresh_sessions')
       .values({
         expires_at: new Date(issuedAt.getTime() + REFRESH_TTL_MILLISECONDS),
         family_id: familyId,
         id: sessionId,
+        ...sessionMetadataColumns(metadata, issuedAt),
         organization_id: user.organizationId,
         replaced_by: null,
         revoked_at: null,
@@ -378,6 +590,17 @@ export class AuthService {
       },
     };
   }
+}
+
+function sessionMetadataColumns(
+  metadata: SessionMetadata,
+  lastSeenAt: Date,
+): Readonly<{ ip_address: string | null; last_seen_at: Date; user_agent: string | null }> {
+  return {
+    ip_address: metadata.ipAddress?.slice(0, 255) ?? null,
+    last_seen_at: lastSeenAt,
+    user_agent: metadata.userAgent?.slice(0, 512) ?? null,
+  } as const;
 }
 
 export async function bootstrapFirstAdmin(
