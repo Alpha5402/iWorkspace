@@ -34,6 +34,16 @@ describe('contracts', () => {
     expect(() => RunStatusSchema.parse('DONE')).toThrow();
   });
 
+  it('publishes the ruleset draft lifecycle in the M1 OpenAPI contract', () => {
+    const paths = createOpenApiDocument(true).paths;
+
+    expect(paths).toHaveProperty('/api/v1/projects/{projectId}/rulesets/{rulesetId}/versions');
+    expect(paths).toHaveProperty('/api/v1/projects/{projectId}/ruleset-versions/{versionId}');
+    expect(paths).toHaveProperty(
+      '/api/v1/projects/{projectId}/ruleset-versions/{versionId}/publish',
+    );
+  });
+
   it('rejects malformed error and health responses', () => {
     expect(() => ErrorResponseSchema.parse({ error: { code: '', traceId: '' } })).toThrow();
     expect(() => HealthResponseSchema.parse({ service: '', status: 'unknown' })).toThrow();

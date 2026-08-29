@@ -146,6 +146,7 @@ export type M1Runtime = Readonly<{
     | 'createProjectToken'
     | 'createRepositoryConnection'
     | 'createRuleset'
+    | 'createRulesetVersion'
     | 'disconnectRepositoryConnection'
     | 'getReview'
     | 'getArtifactForDownload'
@@ -171,6 +172,7 @@ export type M1Runtime = Readonly<{
     | 'setDefaultRulesetVersion'
     | 'setProjectMember'
     | 'triggerReview'
+    | 'updateRulesetDraft'
     | 'authenticateProjectToken'
   >;
   github: Pick<GitHubAppProvider, 'createInstallationToken' | 'getRepository'>;
@@ -813,6 +815,36 @@ export function createM1Router(runtime: M1Runtime): Router {
         getResponseTraceId(response.locals),
       );
       response.status(201).json({ ruleset });
+    }),
+  );
+
+  router.post(
+    '/projects/:projectId/rulesets/:rulesetId/versions',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const version = await runtime.controlPlane.createRulesetVersion(
+        await requireUser(request, runtime),
+        z.uuid().parse(request.params.projectId),
+        z.uuid().parse(request.params.rulesetId),
+        z.object({ rules: z.array(RuleDefinitionSchema).min(1) }).parse(request.body),
+        getResponseTraceId(response.locals),
+      );
+      response.status(201).json({ version });
+    }),
+  );
+
+  router.patch(
+    '/projects/:projectId/ruleset-versions/:versionId',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const version = await runtime.controlPlane.updateRulesetDraft(
+        await requireUser(request, runtime),
+        z.uuid().parse(request.params.projectId),
+        z.uuid().parse(request.params.versionId),
+        z.object({ rules: z.array(RuleDefinitionSchema).min(1) }).parse(request.body),
+        getResponseTraceId(response.locals),
+      );
+      response.status(200).json({ version });
     }),
   );
 

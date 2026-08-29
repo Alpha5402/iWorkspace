@@ -250,7 +250,7 @@ infra/
 - [x] 根据路径与语言映射规则，并按目录邻近/import 关系构建稳定批次。
 - [x] 受信任的确定性规则先执行；用户规则不能上传可执行脚本。
 - [x] 已发布 Ruleset Version 可显式切换为项目默认版本。
-- [ ] 补充 Draft 编辑和同一 Ruleset 下的新版本创建接口。
+- [x] 补充 Draft 编辑和同一 Ruleset 下的新版本创建接口；Draft 内容可更新，Published Version 继续由数据库触发器保持不可变。创建下一版本时锁定 Ruleset 父记录来串行化版本号分配，并以部分唯一索引兜底“同一 Ruleset 最多一个 Draft”，避免依赖单进程锁或先查后写约定。
 
 ### M1-07：DeepSeek Review 与 Verify
 

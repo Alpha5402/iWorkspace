@@ -708,6 +708,107 @@ export class ControlPlaneService {
     });
   }
 
+  public async updateRulesetDraft(
+    actor: UserActor,
+    projectId: string,
+    versionId: string,
+    input: Readonly<{ rules: readonly unknown[] }>,
+    traceId: string,
+  ): Promise<Readonly<{ contentHash: string; versionId: string }>> {
+    const rules = input.rules.map((rule) => RuleDefinitionSchema.parse(rule));
+    const contentHash = sha256(canonicalize(rules));
+    return withTenant(this.database, actor.organizationId, async (transaction) => {
+      await this.assertProjectPermission(transaction, actor, projectId, 'project:manage');
+      const updated = await transaction
+        .updateTable('ruleset_versions')
+        .set({ content_hash: contentHash, rules: JSON.stringify(rules) })
+        .where('id', '=', versionId)
+        .where('project_id', '=', projectId)
+        .where('status', '=', 'DRAFT')
+        .returning('id')
+        .executeTakeFirst();
+      if (updated === undefined) {
+        throw new HttpError(
+          409,
+          'RULESET_NOT_DRAFT',
+          'Only a draft ruleset version can be edited.',
+        );
+      }
+      await this.audit(
+        transaction,
+        actor,
+        'ruleset.draft_updated',
+        'RULESET_VERSION',
+        versionId,
+        traceId,
+        projectId,
+      );
+      return { contentHash, versionId: updated.id };
+    });
+  }
+
+  public async createRulesetVersion(
+    actor: UserActor,
+    projectId: string,
+    rulesetId: string,
+    input: Readonly<{ rules: readonly unknown[] }>,
+    traceId: string,
+  ): Promise<Readonly<{ version: number; versionId: string }>> {
+    const rules = input.rules.map((rule) => RuleDefinitionSchema.parse(rule));
+    return withTenant(this.database, actor.organizationId, async (transaction) => {
+      await this.assertProjectPermission(transaction, actor, projectId, 'project:manage');
+      const ruleset = await transaction
+        .selectFrom('rulesets')
+        .select('id')
+        .where('id', '=', rulesetId)
+        .where('project_id', '=', projectId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (ruleset === undefined) {
+        throw new HttpError(404, 'RULESET_NOT_FOUND', 'Ruleset was not found.');
+      }
+      const versions = await transaction
+        .selectFrom('ruleset_versions')
+        .select(['status', 'version'])
+        .where('ruleset_id', '=', rulesetId)
+        .orderBy('version', 'desc')
+        .execute();
+      if (versions.some((version) => version.status === 'DRAFT')) {
+        throw new HttpError(
+          409,
+          'RULESET_DRAFT_EXISTS',
+          'Publish or continue editing the existing draft before creating another version.',
+        );
+      }
+      const versionNumber = (versions[0]?.version ?? 0) + 1;
+      const version = await transaction
+        .insertInto('ruleset_versions')
+        .values({
+          content_hash: sha256(canonicalize(rules)),
+          created_by: actor.userId,
+          organization_id: actor.organizationId,
+          project_id: projectId,
+          published_at: null,
+          rules: JSON.stringify(rules),
+          ruleset_id: rulesetId,
+          status: 'DRAFT',
+          version: versionNumber,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await this.audit(
+        transaction,
+        actor,
+        'ruleset.version_created',
+        'RULESET_VERSION',
+        version.id,
+        traceId,
+        projectId,
+      );
+      return { version: versionNumber, versionId: version.id };
+    });
+  }
+
   public async setDefaultRulesetVersion(
     actor: UserActor,
     projectId: string,
@@ -764,6 +865,7 @@ export class ControlPlaneService {
         ])
         .where('rulesets.project_id', '=', projectId)
         .orderBy('rulesets.created_at', 'desc')
+        .orderBy('ruleset_versions.version', 'desc')
         .execute();
     });
   }

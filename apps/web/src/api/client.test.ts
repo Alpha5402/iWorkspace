@@ -52,6 +52,7 @@ describe('API client', () => {
       {},
       undefined,
       { ruleset: { rulesetId: 'ruleset', versionId: 'version' } },
+      { version: { version: 2, versionId: 'version-2' } },
       { token: { id: 'token' } },
       { review: { id: 'run' } },
       { url: 'https://github.test/install' },
@@ -65,6 +66,7 @@ describe('API client', () => {
       {},
       undefined,
       undefined,
+      { version: { contentHash: 'hash', versionId: 'version' } },
       undefined,
       { review: { runId: 'run', status: 'ACCEPTED' } },
     ];
@@ -88,6 +90,9 @@ describe('API client', () => {
       rulesetId: 'ruleset',
       versionId: 'version',
     });
+    await expect(client.createRulesetVersion('project', 'ruleset', { rules: [] })).resolves.toEqual(
+      { version: 2, versionId: 'version-2' },
+    );
     await expect(client.createToken('project', { name: 'Action' })).resolves.toEqual({
       id: 'token',
     });
@@ -105,6 +110,10 @@ describe('API client', () => {
     await client.login('owner@example.com', 'password');
     await client.logout();
     await client.publishRuleset('project', 'version');
+    await expect(client.updateRulesetDraft('project', 'version', { rules: [] })).resolves.toEqual({
+      contentHash: 'hash',
+      versionId: 'version',
+    });
     await client.setDefaultRulesetVersion('project', 'version');
     await expect(client.triggerReview('project', { source: {} })).resolves.toEqual({
       runId: 'run',
@@ -113,11 +122,11 @@ describe('API client', () => {
 
     expect(client.artifactDownloadUrl('artifact')).toBe('/api/v1/artifacts/artifact/download');
     expect(client.eventUrl('run')).toBe('/api/v1/reviews/run/events');
-    expect(fetchImplementation.mock.calls[7]?.[0]).toBe(
+    expect(fetchImplementation.mock.calls[8]?.[0]).toBe(
       '/api/v1/integrations/github/install-url?projectId=project%20id',
     );
     expect(
-      new Headers(fetchImplementation.mock.calls[10]?.[1]?.headers).get('x-csrf-token'),
+      new Headers(fetchImplementation.mock.calls[11]?.[1]?.headers).get('x-csrf-token'),
     ).toBeNull();
     expect(new Headers(fetchImplementation.mock.calls[1]?.[1]?.headers).get('x-csrf-token')).toBe(
       'csrf-value',

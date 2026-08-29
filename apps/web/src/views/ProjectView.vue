@@ -2,12 +2,12 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-import { apiClient, type ReviewSummary } from '../api/client.js';
+import { apiClient, type ReviewSummary, type RulesetVersionSummary } from '../api/client.js';
 
 const route = useRoute();
 const router = useRouter();
 const projectId = computed(() => String(route.params.projectId));
-const rulesets = ref<readonly Record<string, unknown>[]>([]);
+const rulesets = ref<readonly RulesetVersionSummary[]>([]);
 const connections = ref<readonly Record<string, unknown>[]>([]);
 const tokens = ref<readonly Record<string, unknown>[]>([]);
 const reviews = ref<readonly ReviewSummary[]>([]);
@@ -62,11 +62,37 @@ async function createToken(): Promise<void> {
 }
 
 async function createRuleset(): Promise<void> {
-  const result = await apiClient.createRuleset(projectId.value, {
+  await apiClient.createRuleset(projectId.value, {
     name: rulesetName.value,
-    rules: JSON.parse(rulesJson.value) as unknown,
+    rules: parseRules(),
   });
-  await apiClient.publishRuleset(projectId.value, result.versionId);
+  await load();
+}
+
+function parseRules(): readonly unknown[] {
+  const parsed: unknown = JSON.parse(rulesJson.value);
+  if (!Array.isArray(parsed)) throw new Error('规则 JSON 必须是数组。');
+  return parsed;
+}
+
+function loadRulesetVersion(ruleset: RulesetVersionSummary): void {
+  rulesJson.value = JSON.stringify(ruleset.rules, null, 2);
+}
+
+async function saveRulesetDraft(versionId: string): Promise<void> {
+  await apiClient.updateRulesetDraft(projectId.value, versionId, { rules: parseRules() });
+  await load();
+}
+
+async function publishRuleset(versionId: string): Promise<void> {
+  await apiClient.publishRuleset(projectId.value, versionId);
+  await load();
+}
+
+async function createNextRulesetVersion(ruleset: RulesetVersionSummary): Promise<void> {
+  await apiClient.createRulesetVersion(projectId.value, ruleset.rulesetId, {
+    rules: ruleset.rules,
+  });
   await load();
 }
 
@@ -118,17 +144,24 @@ onMounted(async () => {
       <form class="panel form-stack" @submit.prevent="createRuleset">
         <h2>规则集</h2>
         <label>名称<input v-model="rulesetName" /></label>
-        <label>规则 JSON<textarea v-model="rulesJson" rows="12" /></label
-        ><button>创建并发布</button>
+        <label>规则 JSON<textarea v-model="rulesJson" rows="12" /></label><button>创建草稿</button>
         <small>{{ rulesets.length }} 个版本</small>
-        <button
+        <div
           v-for="ruleset in rulesets"
           :key="String(ruleset.versionId)"
-          type="button"
-          @click="setDefaultRuleset(String(ruleset.versionId))"
+          class="list-row form-stack"
         >
-          设为默认：{{ ruleset.name }} v{{ ruleset.version }}
-        </button>
+          <strong>{{ ruleset.name }} v{{ ruleset.version }} · {{ ruleset.status }}</strong>
+          <button type="button" @click="loadRulesetVersion(ruleset)">载入规则</button>
+          <template v-if="ruleset.status === 'DRAFT'">
+            <button type="button" @click="saveRulesetDraft(ruleset.versionId)">保存草稿</button>
+            <button type="button" @click="publishRuleset(ruleset.versionId)">发布版本</button>
+          </template>
+          <template v-else>
+            <button type="button" @click="createNextRulesetVersion(ruleset)">创建下一草稿</button>
+            <button type="button" @click="setDefaultRuleset(ruleset.versionId)">设为默认</button>
+          </template>
+        </div>
       </form>
       <form class="panel form-stack" @submit.prevent="connectRepository">
         <h2>GitHub App 仓库</h2>

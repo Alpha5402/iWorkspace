@@ -40,6 +40,69 @@ describe('test environment factory', () => {
     await database.destroy();
   });
 
+  it('enforces at most one draft version per ruleset in the database', async () => {
+    const database = await createMemoryDatabase();
+    const user = await database
+      .insertInto('users')
+      .values({ email: `${randomUUID()}@example.com`, status: 'ACTIVE' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const organization = await database
+      .insertInto('organizations')
+      .values({ name: 'Ruleset constraint' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const project = await database
+      .insertInto('projects')
+      .values({
+        default_ruleset_version_id: null,
+        name: 'Project',
+        organization_id: organization.id,
+        slug: randomUUID(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const ruleset = await database
+      .insertInto('rulesets')
+      .values({
+        created_by: user.id,
+        name: 'Rules',
+        organization_id: organization.id,
+        project_id: project.id,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const draft = (
+      version: number,
+    ): Readonly<{
+      content_hash: string;
+      created_by: string;
+      organization_id: string;
+      project_id: string;
+      published_at: null;
+      rules: string;
+      ruleset_id: string;
+      status: 'DRAFT';
+      version: number;
+    }> => ({
+      content_hash: `hash-${version}`,
+      created_by: user.id,
+      organization_id: organization.id,
+      project_id: project.id,
+      published_at: null,
+      rules: '[]',
+      ruleset_id: ruleset.id,
+      status: 'DRAFT' as const,
+      version,
+    });
+    await database.insertInto('ruleset_versions').values(draft(1)).execute();
+
+    await expect(
+      database.insertInto('ruleset_versions').values(draft(2)).execute(),
+    ).rejects.toThrow();
+    await database.destroy();
+  });
+
   it('persists an outbox delay and enforces inbox ownership', async () => {
     const database = await createMemoryDatabase();
     const fixture = await seedReviewTask(database);

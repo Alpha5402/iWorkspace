@@ -26,6 +26,7 @@ describeInfrastructure('PostgreSQL job reliability and tenant isolation', () => 
   const projectId = randomUUID();
   const otherProjectId = randomUUID();
   const runId = randomUUID();
+  const rulesetId = randomUUID();
   const taskId = randomUUID();
 
   beforeAll(async () => {
@@ -34,7 +35,6 @@ describeInfrastructure('PostgreSQL job reliability and tenant isolation', () => 
     database = createDatabase(databaseUrl);
     await seedTenant(organizationId, projectId, 'visible');
     await seedTenant(otherOrganizationId, otherProjectId, 'hidden');
-    const rulesetId = randomUUID();
     const rulesetVersionId = randomUUID();
     const repositoryId = randomUUID();
     await database
@@ -217,6 +217,49 @@ describeInfrastructure('PostgreSQL job reliability and tenant isolation', () => 
     });
 
     expect(visible).toEqual([{ id: projectId, slug: 'visible' }]);
+  });
+
+  it('allows only one draft per ruleset while preserving published history', async () => {
+    const draft = (
+      id: string,
+      version: number,
+    ): Readonly<{
+      content_hash: string;
+      created_by: string;
+      id: string;
+      organization_id: string;
+      project_id: string;
+      published_at: null;
+      rules: string;
+      ruleset_id: string;
+      status: 'DRAFT';
+      version: number;
+    }> => ({
+      content_hash: `draft-${version}`,
+      created_by: userId,
+      id,
+      organization_id: organizationId,
+      project_id: projectId,
+      published_at: null,
+      rules: '[]',
+      ruleset_id: rulesetId,
+      status: 'DRAFT' as const,
+      version,
+    });
+    const secondVersionId = randomUUID();
+    await database.insertInto('ruleset_versions').values(draft(secondVersionId, 2)).execute();
+    await expect(
+      database.insertInto('ruleset_versions').values(draft(randomUUID(), 3)).execute(),
+    ).rejects.toMatchObject({ code: '23505' });
+
+    await database
+      .updateTable('ruleset_versions')
+      .set({ published_at: new Date(), status: 'PUBLISHED' })
+      .where('id', '=', secondVersionId)
+      .executeTakeFirstOrThrow();
+    await expect(
+      database.insertInto('ruleset_versions').values(draft(randomUUID(), 3)).execute(),
+    ).resolves.toBeDefined();
   });
 
   async function seedTenant(

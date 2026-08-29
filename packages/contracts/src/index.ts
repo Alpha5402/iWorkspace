@@ -142,6 +142,24 @@ export function createOpenApiDocument(m1Enabled = false): OpenApiDocument {
     },
     description: 'Capability is planned but not implemented in M0.',
   };
+  const rulesetRulesRequestBody = {
+    content: {
+      'application/json': {
+        schema: {
+          properties: {
+            rules: {
+              items: { $ref: '#/components/schemas/RuleDefinition' },
+              minItems: 1,
+              type: 'array',
+            },
+          },
+          required: ['rules'],
+          type: 'object',
+        },
+      },
+    },
+    required: true,
+  };
 
   const placeholderCapabilities = capabilities.filter(
     (capability) => !m1Enabled || capability.plannedPhase !== 'M1',
@@ -304,6 +322,67 @@ export function createOpenApiDocument(m1Enabled = false): OpenApiDocument {
           operationId: 'createProject',
           responses: { 201: { description: 'Project created' } },
           tags: ['project'],
+        },
+      },
+      '/api/v1/projects/{projectId}/rulesets': {
+        get: {
+          operationId: 'listRulesets',
+          responses: { 200: { description: 'Ruleset versions' } },
+          tags: ['review'],
+        },
+        post: {
+          operationId: 'createRuleset',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  properties: {
+                    name: { type: 'string' },
+                    rules: {
+                      items: { $ref: '#/components/schemas/RuleDefinition' },
+                      minItems: 1,
+                      type: 'array',
+                    },
+                  },
+                  required: ['name', 'rules'],
+                  type: 'object',
+                },
+              },
+            },
+            required: true,
+          },
+          responses: { 201: { description: 'Ruleset and first draft version created' } },
+          tags: ['review'],
+        },
+      },
+      '/api/v1/projects/{projectId}/rulesets/{rulesetId}/versions': {
+        post: {
+          operationId: 'createRulesetVersion',
+          requestBody: rulesetRulesRequestBody,
+          responses: { 201: { description: 'Next draft version created' } },
+          tags: ['review'],
+        },
+      },
+      '/api/v1/projects/{projectId}/ruleset-versions/{versionId}': {
+        patch: {
+          operationId: 'updateRulesetDraft',
+          requestBody: rulesetRulesRequestBody,
+          responses: { 200: { description: 'Draft version updated' } },
+          tags: ['review'],
+        },
+      },
+      '/api/v1/projects/{projectId}/ruleset-versions/{versionId}/publish': {
+        post: {
+          operationId: 'publishRulesetVersion',
+          responses: { 204: { description: 'Draft version published' } },
+          tags: ['review'],
+        },
+      },
+      '/api/v1/projects/{projectId}/ruleset-versions/{versionId}/default': {
+        post: {
+          operationId: 'setDefaultRulesetVersion',
+          responses: { 204: { description: 'Published version selected as project default' } },
+          tags: ['review'],
         },
       },
       '/api/v1/projects/{projectId}/reviews': {

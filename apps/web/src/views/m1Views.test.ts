@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   createProject: vi.fn(),
   createRepositoryConnection: vi.fn(),
   createRuleset: vi.fn(),
+  createRulesetVersion: vi.fn(),
   createToken: vi.fn(),
   disconnectRepositoryConnection: vi.fn(),
   eventUrl: vi.fn((id: string) => `/events/${id}`),
@@ -41,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   setPlatformUserStatus: vi.fn(),
   switchOrganization: vi.fn(),
   triggerReview: vi.fn(),
+  updateRulesetDraft: vi.fn(),
   verifyEmail: vi.fn(),
 }));
 
@@ -93,6 +95,7 @@ describe('M1 management views', () => {
     mocks.createProject.mockResolvedValue({ id: 'project' });
     mocks.createRepositoryConnection.mockResolvedValue(undefined);
     mocks.createRuleset.mockResolvedValue({ rulesetId: 'ruleset', versionId: 'version' });
+    mocks.createRulesetVersion.mockResolvedValue({ version: 2, versionId: 'version-draft' });
     mocks.createToken.mockResolvedValue({ token: 'one-time-token' });
     mocks.disconnectRepositoryConnection.mockResolvedValue(undefined);
     mocks.getGitHubInstallUrl.mockResolvedValue('https://github.test/install');
@@ -160,7 +163,34 @@ describe('M1 management views', () => {
       },
     ]);
     mocks.listRulesets.mockResolvedValue([
-      { name: 'Baseline', version: 1, versionId: 'version', status: 'PUBLISHED' },
+      {
+        contentHash: 'published-hash',
+        name: 'Baseline',
+        rules: [{ id: 'security/no-secret' }],
+        rulesetId: 'ruleset',
+        status: 'PUBLISHED',
+        version: 1,
+        versionId: 'version',
+      },
+      {
+        contentHash: 'draft-hash',
+        name: 'Draftable',
+        rules: [
+          {
+            appliesTo: { languages: [], paths: ['**/*'] },
+            category: 'DEFECT',
+            defaultSeverity: 'BLOCKING',
+            evidenceRequirement: 'Evidence',
+            guidance: 'Guidance',
+            id: 'security/draft',
+            title: 'Draft rule',
+          },
+        ],
+        rulesetId: 'draft-ruleset',
+        status: 'DRAFT',
+        version: 1,
+        versionId: 'version-draft',
+      },
     ]);
     mocks.listSessions.mockResolvedValue([
       {
@@ -186,6 +216,10 @@ describe('M1 management views', () => {
     mocks.setPlatformUserStatus.mockResolvedValue({ id: 'user', status: 'SUSPENDED' });
     mocks.switchOrganization.mockResolvedValue(undefined);
     mocks.triggerReview.mockResolvedValue({ runId: 'run', status: 'ACCEPTED' });
+    mocks.updateRulesetDraft.mockResolvedValue({
+      contentHash: 'updated-hash',
+      versionId: 'version-draft',
+    });
     mocks.verifyEmail.mockResolvedValue({ organizationId: 'organization' });
   });
 
@@ -241,7 +275,23 @@ describe('M1 management views', () => {
     await forms[0]?.trigger('submit');
     await flushPromises();
     expect(mocks.createRuleset).toHaveBeenCalled();
-    expect(mocks.publishRuleset).toHaveBeenCalledWith('project', 'version');
+    expect(mocks.publishRuleset).not.toHaveBeenCalled();
+    await byText('载入规则')?.trigger('click');
+    await byText('保存草稿')?.trigger('click');
+    await flushPromises();
+    expect(mocks.updateRulesetDraft).toHaveBeenCalledWith(
+      'project',
+      'version-draft',
+      expect.objectContaining({ rules: expect.any(Array) }),
+    );
+    await byText('发布版本')?.trigger('click');
+    await flushPromises();
+    expect(mocks.publishRuleset).toHaveBeenCalledWith('project', 'version-draft');
+    await byText('创建下一草稿')?.trigger('click');
+    await flushPromises();
+    expect(mocks.createRulesetVersion).toHaveBeenCalledWith('project', 'ruleset', {
+      rules: [{ id: 'security/no-secret' }],
+    });
     await byText('设为默认')?.trigger('click');
     await flushPromises();
     expect(mocks.setDefaultRulesetVersion).toHaveBeenCalledWith('project', 'version');

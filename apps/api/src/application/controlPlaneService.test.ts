@@ -407,4 +407,78 @@ describe('ControlPlaneService', () => {
         .executeTakeFirstOrThrow(),
     ).resolves.toEqual({ status: 'REMOVED' });
   });
+
+  it('edits only drafts and creates one serialized draft version per ruleset', async () => {
+    const project = await control.createProject(
+      actor,
+      { name: 'Versioned', slug: 'versioned' },
+      'trace',
+    );
+    const first = await control.createRuleset(
+      actor,
+      project.id,
+      { name: 'Baseline', rules: [rule] },
+      'trace-create',
+    );
+    const revisedRule = { ...rule, title: 'Never commit credentials' };
+    const updated = await control.updateRulesetDraft(
+      actor,
+      project.id,
+      first.versionId,
+      { rules: [revisedRule] },
+      'trace-update',
+    );
+    expect(updated.contentHash).toHaveLength(64);
+
+    await control.publishRuleset(actor, project.id, first.versionId, 'trace-publish');
+    await expect(
+      control.updateRulesetDraft(
+        actor,
+        project.id,
+        first.versionId,
+        { rules: [rule] },
+        'trace-illegal-update',
+      ),
+    ).rejects.toMatchObject({ code: 'RULESET_NOT_DRAFT', status: 409 });
+
+    const second = await control.createRulesetVersion(
+      actor,
+      project.id,
+      first.rulesetId,
+      { rules: [{ ...revisedRule, guidance: 'Reject credentials and private keys.' }] },
+      'trace-next-version',
+    );
+    expect(second.version).toBe(2);
+    await expect(
+      control.createRulesetVersion(
+        actor,
+        project.id,
+        first.rulesetId,
+        { rules: [rule] },
+        'trace-duplicate-draft',
+      ),
+    ).rejects.toMatchObject({ code: 'RULESET_DRAFT_EXISTS', status: 409 });
+
+    const versions = await control.listRulesets(actor, project.id);
+    expect(versions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'PUBLISHED', version: 1, versionId: first.versionId }),
+        expect.objectContaining({ status: 'DRAFT', version: 2, versionId: second.versionId }),
+      ]),
+    );
+    await expect(
+      database
+        .selectFrom('audit_events')
+        .select('action')
+        .where('target_id', 'in', [first.versionId, second.versionId])
+        .orderBy('occurred_at')
+        .execute(),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { action: 'ruleset.draft_updated' },
+        { action: 'ruleset.published' },
+        { action: 'ruleset.version_created' },
+      ]),
+    );
+  });
 });

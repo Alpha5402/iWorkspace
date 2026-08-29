@@ -20,6 +20,15 @@ export type ReviewSummary = Readonly<{
   pullRequestNumber: number;
   status: string;
 }>;
+export type RulesetVersionSummary = Readonly<{
+  contentHash: string;
+  name: string;
+  rules: unknown;
+  rulesetId: string;
+  status: 'DRAFT' | 'PUBLISHED';
+  version: number;
+  versionId: string;
+}>;
 export type OrganizationSummary = Readonly<{
   current: boolean;
   id: string;
@@ -78,6 +87,11 @@ export type ApiClient = Readonly<{
     projectId: string,
     input: Record<string, unknown>,
   ): Promise<Readonly<{ rulesetId: string; versionId: string }>>;
+  createRulesetVersion(
+    projectId: string,
+    rulesetId: string,
+    input: Record<string, unknown>,
+  ): Promise<Readonly<{ version: number; versionId: string }>>;
   createToken(
     projectId: string,
     input: Record<string, unknown>,
@@ -96,7 +110,7 @@ export type ApiClient = Readonly<{
     projectId: string,
   ): Promise<readonly Readonly<Record<string, unknown>>[]>;
   listReviews(projectId: string): Promise<readonly ReviewSummary[]>;
-  listRulesets(projectId: string): Promise<readonly Readonly<Record<string, unknown>>[]>;
+  listRulesets(projectId: string): Promise<readonly RulesetVersionSummary[]>;
   listTokens(projectId: string): Promise<readonly Readonly<Record<string, unknown>>[]>;
   listOrganizations(): Promise<readonly OrganizationSummary[]>;
   listSessions(): Promise<readonly SessionSummary[]>;
@@ -135,6 +149,11 @@ export type ApiClient = Readonly<{
   login(email: string, password: string): Promise<void>;
   logout(): Promise<void>;
   publishRuleset(projectId: string, versionId: string): Promise<void>;
+  updateRulesetDraft(
+    projectId: string,
+    versionId: string,
+    input: Record<string, unknown>,
+  ): Promise<Readonly<{ contentHash: string; versionId: string }>>;
   setDefaultRulesetVersion(projectId: string, versionId: string): Promise<void>;
   triggerReview(
     projectId: string,
@@ -231,6 +250,14 @@ export function createApiClient(
         )
       ).ruleset;
     },
+    async createRulesetVersion(projectId, rulesetId, input) {
+      return (
+        await request<{ version: { version: number; versionId: string } }>(
+          `/projects/${projectId}/rulesets/${rulesetId}/versions`,
+          { body: JSON.stringify(input), method: 'POST' },
+        )
+      ).version;
+    },
     async createToken(projectId, input) {
       return (
         await request<{ token: Record<string, unknown> }>(`/projects/${projectId}/tokens`, {
@@ -293,7 +320,7 @@ export function createApiClient(
     },
     async listRulesets(projectId) {
       return (
-        await request<{ rulesets: readonly Record<string, unknown>[] }>(
+        await request<{ rulesets: readonly RulesetVersionSummary[] }>(
           `/projects/${projectId}/rulesets`,
         )
       ).rulesets;
@@ -378,6 +405,14 @@ export function createApiClient(
       await request(`/projects/${projectId}/ruleset-versions/${versionId}/publish`, {
         method: 'POST',
       });
+    },
+    async updateRulesetDraft(projectId, versionId, input) {
+      return (
+        await request<{ version: { contentHash: string; versionId: string } }>(
+          `/projects/${projectId}/ruleset-versions/${versionId}`,
+          { body: JSON.stringify(input), method: 'PATCH' },
+        )
+      ).version;
     },
     async setDefaultRulesetVersion(projectId, versionId) {
       await request(`/projects/${projectId}/ruleset-versions/${versionId}/default`, {

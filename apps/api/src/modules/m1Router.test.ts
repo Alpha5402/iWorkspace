@@ -22,6 +22,7 @@ const artifactId = randomUUID();
 const tokenId = randomUUID();
 const secretId = randomUUID();
 const versionId = randomUUID();
+const rulesetId = randomUUID();
 const taskId = randomUUID();
 
 const actor: UserActor = {
@@ -76,7 +77,8 @@ function createRuntime(): M1Runtime {
       createProjectSecret: vi.fn().mockResolvedValue({ id: secretId, name: 'SENTRY_DSN' }),
       createProjectToken: vi.fn().mockResolvedValue({ id: tokenId, token: 'iwpat-secret' }),
       createRepositoryConnection: vi.fn().mockResolvedValue({ id: randomUUID() }),
-      createRuleset: vi.fn().mockResolvedValue({ rulesetId: randomUUID(), versionId }),
+      createRuleset: vi.fn().mockResolvedValue({ rulesetId, versionId }),
+      createRulesetVersion: vi.fn().mockResolvedValue({ version: 2, versionId: randomUUID() }),
       disconnectRepositoryConnection: vi.fn().mockResolvedValue(undefined),
       getArtifactForDownload: vi.fn().mockResolvedValue({
         artifactType: 'summary.txt',
@@ -108,6 +110,7 @@ function createRuntime(): M1Runtime {
       setDefaultRulesetVersion: vi.fn().mockResolvedValue(undefined),
       setProjectMember: vi.fn().mockResolvedValue(undefined),
       triggerReview: vi.fn().mockResolvedValue({ id: runId, status: 'ACCEPTED' }),
+      updateRulesetDraft: vi.fn().mockResolvedValue({ contentHash: 'hash', versionId }),
     },
     github: {
       createInstallationToken: vi.fn().mockResolvedValue({
@@ -356,6 +359,12 @@ describe('M1 HTTP router', () => {
         rules: [rule],
       }),
       mutating(
+        request(app).post(`/api/v1/projects/${projectId}/rulesets/${rulesetId}/versions`),
+      ).send({ rules: [rule] }),
+      mutating(
+        request(app).patch(`/api/v1/projects/${projectId}/ruleset-versions/${versionId}`),
+      ).send({ rules: [rule] }),
+      mutating(
         request(app).post(`/api/v1/projects/${projectId}/ruleset-versions/${versionId}/publish`),
       ),
       mutating(
@@ -364,8 +373,23 @@ describe('M1 HTTP router', () => {
     ];
     const responses = await Promise.all(calls);
     expect(responses.map((response) => response.status)).toEqual([
-      200, 201, 204, 200, 201, 200, 204, 204, 200, 201, 204, 200, 201, 204, 200, 201, 204, 204,
+      200, 201, 204, 200, 201, 200, 204, 204, 200, 201, 204, 200, 201, 204, 200, 201, 201, 200, 204,
+      204,
     ]);
+    expect(runtime.controlPlane.createRulesetVersion).toHaveBeenCalledWith(
+      actor,
+      projectId,
+      rulesetId,
+      { rules: [rule] },
+      expect.any(String),
+    );
+    expect(runtime.controlPlane.updateRulesetDraft).toHaveBeenCalledWith(
+      actor,
+      projectId,
+      versionId,
+      { rules: [rule] },
+      expect.any(String),
+    );
   });
 
   it('protects GitHub installation state and validates installation permissions before binding a repository', async () => {
