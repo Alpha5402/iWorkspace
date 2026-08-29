@@ -283,7 +283,8 @@ infra/
 - [x] L2 质量门禁通过：Format、Lint、Typecheck、单元测试、集成测试、架构检查、Dead Code、重复度和 Build。
 - [x] Identity、Security、Review Harness 与 Domain 核心边界分别强制至少 90% 的分支覆盖率。
 - [x] 自动化覆盖重复投递、租约接管、Fencing、Head 变化、Provider 错误、Artifact 校验和 External Effect 协调。
-- [ ] 完成每日 10,000 Review / 100 活跃 Run 的容量基线并归档指标。
+- [x] 建立 Review 接受路径容量 Harness：在一次性 PostgreSQL 上通过真实 HTTP API 完成 10,000 次触发，100 并发下 10,000/10,000 返回 `202`，保持 100 个活跃 Run，p95 128.29ms、吞吐 791.31 req/s；同时核对 Run/Task/Outbox/Audit 各 10,000 条、数据库无死锁/回滚/等待锁。脱敏运行证据归档于本地 `.workspace/proofs/`，该目录不提交仓库。
+- [ ] 补齐 RabbitMQ 消费、Worker 执行/接管、Provider 限流与模型成本在内的端到端容量基线；上述接受路径数据不得冒充完整 Review 吞吐或 L3 证明。
 - [ ] 使用真实 GitHub App、测试仓库和 DeepSeek 跑通 Webhook 与 Action Token 两条 L3 路径。
 - [ ] 运行本仓库 Dogfooding，并整理“需求 → 运行证据”的 M1 Proof Bundle。
 

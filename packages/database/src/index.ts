@@ -4,6 +4,7 @@ import pg from 'pg';
 
 import { type DatabaseSchema } from './schema.js';
 
+export { sql };
 export * from './schema.js';
 export * from './identityEmailOutbox.js';
 export * from './databaseClock.js';

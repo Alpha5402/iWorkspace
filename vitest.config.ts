@@ -13,6 +13,7 @@ export default defineConfig({
         '**/*.test.ts',
         '**/dist/**',
         '**/main.ts',
+        '**/cli/benchmarkReviewAcceptance.ts',
         '**/cli/bootstrapAdmin.ts',
         '**/router.ts',
         '**/vite-env.d.ts',
