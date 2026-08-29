@@ -7,9 +7,11 @@ import { createRabbitMqProbe, RabbitMqBus } from '@delivery/messaging';
 import { createObjectStorageProbe, ImmutableArtifactStore } from '@delivery/object-storage';
 import { createLogger, startServerSpan, startTelemetry } from '@delivery/observability';
 import { DeepSeekResponsesProvider } from '@delivery/providers-agent';
+import { HttpEmailProvider } from '@delivery/providers-email';
 import { GitHubAppProvider } from '@delivery/providers-github';
 
 import { loadWorkerConfig } from './config.js';
+import { EmailDeliveryWorker } from './emailDeliveryWorker.js';
 import { ReviewWorker } from './reviewWorker.js';
 
 const serviceName = 'delivery-worker';
@@ -58,7 +60,18 @@ const reviewWorker =
         `${hostname()}:${process.pid}:${randomUUID()}`,
         logger,
       );
-await reviewWorker?.start();
+const emailWorker =
+  config.m1 === undefined || database === undefined
+    ? undefined
+    : new EmailDeliveryWorker(
+        database,
+        new HttpEmailProvider(config.m1.emailProviderUrl, config.m1.emailProviderApiKey),
+        new Map([[config.m1.emailOutboxKey.version, config.m1.emailOutboxKey.key]]),
+        config.m1.detailsBaseUrl,
+        `${hostname()}:${process.pid}:email:${randomUUID()}`,
+        logger,
+      );
+await Promise.all([reviewWorker?.start(), emailWorker?.start()]);
 
 let shuttingDown = false;
 
@@ -67,7 +80,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shuttingDown = true;
   logger.info({ signal }, 'worker shutting down');
   healthServer.close();
-  await reviewWorker?.close();
+  await Promise.all([reviewWorker?.close(), emailWorker?.close()]);
   await database?.destroy();
   await readinessProbe.close();
   await telemetry.shutdown();

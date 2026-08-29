@@ -24,6 +24,8 @@ const ApiConfigSchema = z.object({
   AUTH_REFRESH_PREVIOUS_PUBLIC_KEY_BASE64: z.string().min(1).optional(),
   AUTH_REFRESH_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
   AUTH_REFRESH_PUBLIC_KEY_BASE64: z.string().min(1).optional(),
+  EMAIL_OUTBOX_KEK_BASE64: z.string().min(1).optional(),
+  EMAIL_OUTBOX_KEK_VERSION: z.coerce.number().int().positive().optional(),
   GITHUB_APP_SLUG: z.string().min(1).optional(),
   GITHUB_APP_ID: z.string().regex(/^\d+$/).optional(),
   GITHUB_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
@@ -40,6 +42,7 @@ export type ApiConfig = Readonly<{
   m1?: Readonly<{
     authAccessKeys: ConfiguredJwtKeySet;
     authRefreshKeys: ConfiguredJwtKeySet;
+    emailOutboxKey: Readonly<{ key: Buffer; version: number }>;
     githubAppSlug: string;
     githubAppId: string;
     githubPrivateKeyPem: string;
@@ -84,6 +87,10 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv): ApiConfig {
             previousKeyId: config.AUTH_REFRESH_PREVIOUS_KEY_ID,
             previousPublicKeyBase64: config.AUTH_REFRESH_PREVIOUS_PUBLIC_KEY_BASE64,
           }),
+          emailOutboxKey: {
+            key: decodeKey(config.EMAIL_OUTBOX_KEK_BASE64, 'EMAIL_OUTBOX_KEK_BASE64'),
+            version: requireM1Number(config.EMAIL_OUTBOX_KEK_VERSION, 'EMAIL_OUTBOX_KEK_VERSION'),
+          },
           githubAppSlug: requireM1Value(config.GITHUB_APP_SLUG, 'GITHUB_APP_SLUG'),
           githubAppId: requireM1Value(config.GITHUB_APP_ID, 'GITHUB_APP_ID'),
           githubPrivateKeyPem: decodePem(
@@ -166,6 +173,11 @@ function loadJwtKeySet(
 }
 
 function requireM1Value(value: string | undefined, name: string): string {
+  if (value === undefined) throw new Error(`${name}_REQUIRED_WHEN_M1_ENABLED`);
+  return value;
+}
+
+function requireM1Number(value: number | undefined, name: string): number {
   if (value === undefined) throw new Error(`${name}_REQUIRED_WHEN_M1_ENABLED`);
   return value;
 }

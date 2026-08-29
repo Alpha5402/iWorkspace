@@ -105,6 +105,11 @@ function createRuntime(): M1Runtime {
     },
     githubAppSlug: 'iworkspace-test',
     githubWebhookSecret: WEBHOOK_SECRET,
+    registration: {
+      register: vi.fn().mockResolvedValue({ accepted: true }),
+      resendVerification: vi.fn().mockResolvedValue({ accepted: true }),
+      verifyEmail: vi.fn().mockResolvedValue({ organizationId }),
+    },
     secureCookies: false,
     webOrigin: WEB_ORIGIN,
   };
@@ -178,6 +183,28 @@ describe('M1 HTTP router', () => {
     expect(logout.headers['set-cookie']).toEqual(
       expect.arrayContaining([expect.stringContaining('iw_access=;')]),
     );
+  });
+
+  it('exposes public registration and email verification without leaking a token', async () => {
+    const app = createTestApp(runtime);
+    const registered = await request(app)
+      .post('/api/v1/auth/register')
+      .send({ email: 'new@example.com', password: 'correct horse battery staple' });
+    const resent = await request(app)
+      .post('/api/v1/auth/resend-verification')
+      .send({ email: 'new@example.com' });
+    const verified = await request(app)
+      .post('/api/v1/auth/verify-email')
+      .send({ token: `iwverify_${'x'.repeat(32)}` });
+
+    expect(registered.status).toBe(202);
+    expect(registered.body).toEqual({ accepted: true });
+    expect(JSON.stringify(registered.body)).not.toContain('token');
+    expect(resent.status).toBe(202);
+    expect(verified).toMatchObject({ status: 200, body: { organizationId } });
+    const registrationInput = vi.mocked(runtime.registration.register).mock.calls.at(0)?.at(0);
+    expect(registrationInput).toMatchObject({ email: 'new@example.com' });
+    expect(registrationInput?.ipAddress).toBeTypeOf('string');
   });
 
   it('validates GitHub webhook signatures and maps pull request identity into one trigger', async () => {

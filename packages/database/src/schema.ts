@@ -16,13 +16,56 @@ export interface UsersTable {
   id: GeneratedId;
   platform_role: Generated<'SUPER_ADMIN' | 'ADMIN' | 'USER'>;
   status: Generated<'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED'>;
-  updated_at: Generated<Timestamp>;
+  updated_at: Timestamp;
 }
 
 export interface UserPasswordCredentialsTable {
   password_changed_at: Generated<Timestamp>;
   password_hash: string;
   user_id: string;
+}
+
+export interface EmailVerificationTokensTable {
+  consumed_at: Timestamp | null;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  id: GeneratedId;
+  superseded_at: Timestamp | null;
+  token_hash: string;
+  user_id: string;
+}
+
+export interface IdentityEmailOutboxTable {
+  aad: string;
+  attempt_count: Generated<number>;
+  available_at: Timestamp;
+  ciphertext: string;
+  claimed_by: string | null;
+  claimed_until: Timestamp | null;
+  created_at: Timestamp;
+  encrypted_dek: string;
+  id: string;
+  iv: string;
+  key_version: number;
+  last_error_code: string | null;
+  max_attempts: Generated<number>;
+  message_type: 'VERIFY_EMAIL';
+  provider_message_id: string | null;
+  recipient_email: string;
+  sent_at: Timestamp | null;
+  status: Generated<'PENDING' | 'CLAIMED' | 'RETRY_WAIT' | 'SENT' | 'FAILED'>;
+  tag: string;
+  verification_token_id: string;
+  wrap_iv: string;
+  wrap_tag: string;
+}
+
+export interface PublicRateLimitsTable {
+  dimension: string;
+  expires_at: Timestamp;
+  hit_count: number;
+  key_hash: string;
+  window_started_at: Timestamp;
 }
 
 export interface OrganizationsTable {
@@ -425,10 +468,12 @@ export interface DatabaseSchema {
   audit_events: AuditEventsTable;
   consumer_inbox: ConsumerInboxTable;
   encrypted_secrets: EncryptedSecretsTable;
+  email_verification_tokens: EmailVerificationTokensTable;
   evidence_records: EvidenceRecordsTable;
   external_effects: ExternalEffectsTable;
   finding_verifications: FindingVerificationsTable;
   idempotency_records: IdempotencyRecordsTable;
+  identity_email_outbox: IdentityEmailOutboxTable;
   invitations: InvitationsTable;
   organization_members: OrganizationMembersTable;
   organizations: OrganizationsTable;
@@ -438,6 +483,7 @@ export interface DatabaseSchema {
   projects: ProjectsTable;
   provider_invocations: ProviderInvocationsTable;
   provider_capacity_leases: ProviderCapacityLeasesTable;
+  public_rate_limits: PublicRateLimitsTable;
   refresh_sessions: RefreshSessionsTable;
   repository_connections: RepositoryConnectionsTable;
   review_batches: ReviewBatchesTable;

@@ -161,6 +161,27 @@ export function createOpenApiDocument(m1Enabled = false): OpenApiDocument {
   );
   if (m1Enabled) {
     Object.assign(paths, {
+      '/api/v1/auth/register': {
+        post: {
+          operationId: 'registerAccount',
+          responses: { 202: { description: 'Registration accepted' } },
+          tags: ['identity'],
+        },
+      },
+      '/api/v1/auth/resend-verification': {
+        post: {
+          operationId: 'resendEmailVerification',
+          responses: { 202: { description: 'Verification request accepted' } },
+          tags: ['identity'],
+        },
+      },
+      '/api/v1/auth/verify-email': {
+        post: {
+          operationId: 'verifyEmail',
+          responses: { 200: { description: 'Email verified' } },
+          tags: ['identity'],
+        },
+      },
       '/api/v1/auth/login': {
         post: {
           operationId: 'login',

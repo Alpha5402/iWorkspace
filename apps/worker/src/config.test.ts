@@ -32,6 +32,10 @@ describe('Worker configuration', () => {
       loadWorkerConfig({
         ...infrastructure,
         DEEPSEEK_API_KEY: 'deepseek-key',
+        EMAIL_OUTBOX_KEK_BASE64: Buffer.alloc(32, 8).toString('base64'),
+        EMAIL_OUTBOX_KEK_VERSION: '2',
+        EMAIL_PROVIDER_API_KEY: 'email-key',
+        EMAIL_PROVIDER_URL: 'https://email.example.test/send',
         GITHUB_APP_ID: '123',
         GITHUB_PRIVATE_KEY_BASE64: Buffer.from('github pem').toString('base64'),
         M1_ENABLED: 'true',
@@ -45,6 +49,9 @@ describe('Worker configuration', () => {
     ).toEqual({
       deepSeekApiKey: 'deepseek-key',
       detailsBaseUrl: 'https://web.example.test',
+      emailOutboxKey: { key: Buffer.alloc(32, 8), version: 2 },
+      emailProviderApiKey: 'email-key',
+      emailProviderUrl: 'https://email.example.test/send',
       githubAppId: '123',
       githubPrivateKeyPem: 'github pem',
       objectStorage: {

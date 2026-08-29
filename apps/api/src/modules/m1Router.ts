@@ -20,6 +20,7 @@ import {
   type ControlPlaneService,
   type ProjectTokenActor,
 } from '../application/controlPlaneService.js';
+import { type RegistrationService } from '../application/registrationService.js';
 import { HttpError } from '../errors.js';
 import { getResponseTraceId } from '../middleware/requestContext.js';
 import { getRawBody } from '../middleware/rawBody.js';
@@ -27,6 +28,10 @@ import { getRawBody } from '../middleware/rawBody.js';
 const LoginSchema = z.object({
   email: z.email(),
   organizationId: z.uuid().optional(),
+  password: z.string().min(12),
+});
+const RegistrationSchema = z.object({
+  email: z.email(),
   password: z.string().min(12),
 });
 const ProjectSchema = z.object({
@@ -144,6 +149,7 @@ export type M1Runtime = Readonly<{
   artifactStore: Pick<ImmutableArtifactStore, 'get'>;
   githubAppSlug: string;
   githubWebhookSecret: string;
+  registration: Pick<RegistrationService, 'register' | 'resendVerification' | 'verifyEmail'>;
   secureCookies: boolean;
   webOrigin: string;
 }>;
@@ -294,9 +300,44 @@ export function createM1Router(runtime: M1Runtime): Router {
   );
 
   router.post(
+    '/auth/register',
+    asyncRoute(async (request, response) => {
+      const payload = RegistrationSchema.parse(request.body);
+      const result = await runtime.registration.register({
+        ...payload,
+        ipAddress: request.ip ?? request.socket.remoteAddress ?? 'unknown',
+      });
+      response.status(202).json(result);
+    }),
+  );
+
+  router.post(
+    '/auth/verify-email',
+    asyncRoute(async (request, response) => {
+      const payload = z.object({ token: z.string().min(20) }).parse(request.body);
+      response.status(200).json(await runtime.registration.verifyEmail(payload.token));
+    }),
+  );
+
+  router.post(
+    '/auth/resend-verification',
+    asyncRoute(async (request, response) => {
+      const payload = z.object({ email: z.email() }).parse(request.body);
+      const result = await runtime.registration.resendVerification({
+        email: payload.email,
+        ipAddress: request.ip ?? request.socket.remoteAddress ?? 'unknown',
+      });
+      response.status(202).json(result);
+    }),
+  );
+
+  router.post(
     '/auth/login',
     asyncRoute(async (request, response) => {
-      const session = await runtime.auth.login(LoginSchema.parse(request.body));
+      const session = await runtime.auth.login({
+        ...LoginSchema.parse(request.body),
+        ipAddress: request.ip ?? request.socket.remoteAddress ?? 'unknown',
+      });
       setSessionCookies(response, session, runtime.secureCookies);
       response.status(200).json({ user: session.user });
     }),

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AuthService, bootstrapFirstAdmin, type UserActor } from './authService.js';
 import { ControlPlaneService } from './controlPlaneService.js';
+import { PublicAuthRateLimiter } from './publicAuthRateLimiter.js';
 
 const PEPPER = 'control-plane-test-token-pepper';
 
@@ -59,7 +60,13 @@ describe('ControlPlaneService', () => {
   beforeEach(async () => {
     database = await createMemoryDatabase();
     const tokens = tokenServices();
-    auth = new AuthService(database, tokens.access, tokens.refresh, PEPPER);
+    auth = new AuthService(
+      database,
+      tokens.access,
+      tokens.refresh,
+      PEPPER,
+      new PublicAuthRateLimiter(database, PEPPER),
+    );
     await bootstrapFirstAdmin({
       database,
       email: 'owner@example.com',
@@ -68,6 +75,7 @@ describe('ControlPlaneService', () => {
     });
     const session = await auth.login({
       email: 'owner@example.com',
+      ipAddress: '192.0.2.20',
       password: 'correct horse battery staple',
     });
     actor = await auth.verifyAccessToken(session.accessToken);
@@ -97,6 +105,7 @@ describe('ControlPlaneService', () => {
     await auth.acceptInvitation({ password: 'viewer secure password', token: invitation.token });
     const viewerSession = await auth.login({
       email: 'viewer@example.com',
+      ipAddress: '192.0.2.21',
       password: 'viewer secure password',
     });
     const viewer = await auth.verifyAccessToken(viewerSession.accessToken);

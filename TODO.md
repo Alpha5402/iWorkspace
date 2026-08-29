@@ -1,11 +1,11 @@
 # AI Delivery Control Plane 总体 TODO
 
-> 状态：M0 已完成。M1 原邀请制主闭环与 L2 自动化验证已完成；M1 身份范围现扩展为公开注册、平台级用户分层、管理员后台和 JWT 双 Token，尚未实现。Artifact GC、Ruleset 版本编辑、容量基线、真实 GitHub/DeepSeek、进程故障接管和 Dogfooding Proof Bundle（L3）同样待完成。M2、M3 未开始。
+> 状态：M0 已完成。M1 原邀请制主闭环与 L2 自动化验证已完成；公开注册、邮箱验证、个人 Organization、PostgreSQL 限流和 JWT 双 Token 基础已经落地，平台管理员后台、组织切换与设备会话管理仍待完成。Artifact GC、Ruleset 版本编辑、容量基线、真实 GitHub/DeepSeek、进程故障接管和 Dogfooding Proof Bundle（L3）同样待完成。M2、M3 未开始。
 
 ## 0. 项目目标与阶段顺序
 
 - [x] M0：架构基线与工程骨架——建立可运行、可验证的框架，未实现模块明确返回 `501 FEATURE_NOT_IMPLEMENTED`。
-- [ ] M1：账户、数据库、安全与代码审查——原邀请制主闭环与 L2 已完成；公开注册和平台管理扩展、硬化项及 L3 退出门槛待完成。
+- [ ] M1：账户、数据库、安全与代码审查——原邀请制主闭环、公开注册与双 Token 基础的 L2 已完成；平台管理扩展、硬化项及 L3 退出门槛待完成。
 - [ ] M2：设计稿与 HTML 协作——完成需求/Figma/HTML、批注、Agent Patch、版本冲突、预览和审批。
 - [ ] M3：研发与最终交付闭环——完成文档裁切、Workspace、代码生成、验证、审查、Proof Bundle、Engineering Gate 和 PR。
 
@@ -291,8 +291,8 @@ infra/
 
 #### 目标与角色边界
 
-- [ ] 开放公开注册，但新账户先进入 `PENDING_VERIFICATION`；完成邮箱验证后才激活账户并在同一事务创建个人 Organization。
-- [ ] 平台角色固定为 `SUPER_ADMIN / ADMIN / USER`，与组织角色 `OWNER / ADMIN / MEMBER`、项目角色 `MAINTAINER / REVIEWER / VIEWER` 相互独立，禁止根据名称相同隐式继承权限。
+- [x] 开放公开注册，但新账户先进入 `PENDING_VERIFICATION`；完成邮箱验证后才激活账户并在同一事务创建个人 Organization。
+- [x] 平台角色固定为 `SUPER_ADMIN / ADMIN / USER`，与组织角色 `OWNER / ADMIN / MEMBER`、项目角色 `MAINTAINER / REVIEWER / VIEWER` 相互独立，禁止根据名称相同隐式继承权限。
 - [ ] 首位 `SUPER_ADMIN` 仍由可信 CLI 创建；只有 `SUPER_ADMIN` 可以授予或撤销平台 `ADMIN`，并保护最后一个 `SUPER_ADMIN` 不被停用、降级或删除。
 - [ ] 平台 `ADMIN` 可以查询和管理全站普通用户、会话与账户状态，但不因平台角色自动获得任意租户项目数据访问权；进入租户业务仍需显式 Membership。
 - [ ] 统一 Principal 类型为 `USER_SESSION / PROJECT_TOKEN / SYSTEM`；所有权限决策和 Audit Event 必须记录 Principal 类型与稳定 ID。
@@ -310,9 +310,9 @@ infra/
 
 #### 注册、组织切换与账户生命周期
 
-- [ ] 实现 `POST /api/v1/auth/register`、`POST /api/v1/auth/verify-email`、`POST /api/v1/auth/resend-verification`；重复邮箱和验证码状态使用稳定错误码且不泄露账户是否存在。
-- [ ] 邮箱验证 Token 使用高熵随机值、单次使用、短期过期并仅保存摘要；生产环境通过 Email Provider Port + Outbox 发送，禁止在响应和日志返回验证 Token。
-- [ ] 初期使用 PostgreSQL 记录公开注册、登录和重发验证的分布式限流桶；只有指标证明数据库成为瓶颈后才引入 Redis。
+- [x] 实现 `POST /api/v1/auth/register`、`POST /api/v1/auth/verify-email`、`POST /api/v1/auth/resend-verification`；重复邮箱和验证码状态使用稳定错误码且不泄露账户是否存在。
+- [x] 邮箱验证 Token 使用高熵随机值、单次使用、短期过期并仅保存摘要；生产环境通过 Email Provider Port + Outbox 发送，禁止在响应和日志返回验证 Token。
+- [x] 初期使用 PostgreSQL 记录公开注册、登录和重发验证的分布式限流桶；只有指标证明数据库成为瓶颈后才引入 Redis。
 - [ ] 实现 `GET /api/v1/me/organizations` 与 `POST /api/v1/auth/switch-organization`；切换时验证 Membership、撤销旧 Session Family 并签发绑定新 Organization 的双 Token。
 - [ ] 用户状态至少支持 `PENDING_VERIFICATION / ACTIVE / SUSPENDED`；停用采用可审计状态迁移，不物理删除用户、凭据、审计和历史运行血缘。
 
@@ -333,6 +333,8 @@ infra/
 
 #### 关键决策与 Trade-off
 
+本切片已固定以下实现决策：注册发生在租户创建之前，因此身份邮件使用独立 Outbox，不削弱必须携带租户标识的业务事件 Envelope；验证 Token 摘要与可投递密文分离，密文使用独立版本化 KEK，仅由 Email Worker 在内存解密；过期、租约和限流窗口统一使用 PostgreSQL 时钟；注册与重发对已存在/不存在账户返回相同响应。代价是增加一套小型 Identity Outbox 与部署密钥，但换来事务性邮件意图、可接管投递、稳定幂等和账户枚举防护。
+
 - [ ] 记录 ADR：公开注册扩大攻击面并增加 Email Provider、限流和账户枚举防护成本，但换来自助获客与独立用户身份。
 - [ ] 记录 ADR：Refresh Token 虽采用 JWT，仍保持服务端 Session/JTI 状态，因此牺牲“完全无状态”，换取旋转、重放检测、管理员撤销和设备管理能力。
 - [ ] 记录 ADR：平台管理员不自动绕过租户权限，增加一次显式授权检查，但显著缩小后台账号泄露后的数据暴露范围。
@@ -340,12 +342,12 @@ infra/
 
 #### 测试与退出条件
 
-- [ ] 覆盖重复邮箱并发注册、验证 Token 重放/过期、限流、邮箱 Provider 失败与 Outbox 重试。
+- [x] 覆盖重复邮箱并发注册、验证 Token 重放/过期、限流、邮箱 Provider 失败与 Outbox 重试。
 - [ ] 覆盖 Access/Refresh 类型混淆、错误 Audience/Key、Refresh 重放、密钥轮换、账户停用、密码变更和 Session 全量撤销。
 - [ ] 覆盖越权提权、最后一个 `SUPER_ADMIN` 保护、管理员不能隐式读取租户项目、跨组织切换和停用后的即时授权拒绝。
 - [ ] 管理员用户列表验证分页稳定性、敏感字段缺失、操作审计和大数据量查询计划。
 - [ ] 浏览器真实跑通“公开注册 → 邮箱验证 → 登录 → 切换组织 → 管理员查询/停用用户 → Session 失效”，不使用前端 Mock 作为完成证据。
-- [ ] Identity、Security 核心分支覆盖率继续不低于 90%，并通过完整 `pnpm quality`、空库迁移和升级迁移测试。
+- [x] Identity、Security 核心分支覆盖率继续不低于 90%，并通过完整 `pnpm quality`、空库迁移和升级迁移测试。
 
 ### M1 退出门槛
 

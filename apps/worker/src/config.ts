@@ -7,6 +7,10 @@ const WorkerConfigSchema = z.object({
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url(),
   RABBITMQ_URL: z.url(),
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
+  EMAIL_OUTBOX_KEK_BASE64: z.string().min(1).optional(),
+  EMAIL_OUTBOX_KEK_VERSION: z.coerce.number().int().positive().optional(),
+  EMAIL_PROVIDER_API_KEY: z.string().min(1).optional(),
+  EMAIL_PROVIDER_URL: z.url().optional(),
   GITHUB_APP_ID: z.string().regex(/^\d+$/).optional(),
   GITHUB_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
   S3_ACCESS_KEY: z.string().min(1).optional(),
@@ -27,6 +31,9 @@ export type WorkerConfig = Readonly<{
   m1?: Readonly<{
     deepSeekApiKey: string;
     detailsBaseUrl: string;
+    emailOutboxKey: Readonly<{ key: Buffer; version: number }>;
+    emailProviderApiKey: string;
+    emailProviderUrl: string;
     githubAppId: string;
     githubPrivateKeyPem: string;
     objectStorage: Readonly<{
@@ -49,6 +56,15 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv): WorkerConfig {
       : {
           deepSeekApiKey: requireM1Value(config.DEEPSEEK_API_KEY, 'DEEPSEEK_API_KEY'),
           detailsBaseUrl: requireM1Value(config.WEB_ORIGIN, 'WEB_ORIGIN'),
+          emailOutboxKey: {
+            key: decodeKey(config.EMAIL_OUTBOX_KEK_BASE64, 'EMAIL_OUTBOX_KEK_BASE64'),
+            version: requireM1Number(config.EMAIL_OUTBOX_KEK_VERSION, 'EMAIL_OUTBOX_KEK_VERSION'),
+          },
+          emailProviderApiKey: requireM1Value(
+            config.EMAIL_PROVIDER_API_KEY,
+            'EMAIL_PROVIDER_API_KEY',
+          ),
+          emailProviderUrl: requireM1Value(config.EMAIL_PROVIDER_URL, 'EMAIL_PROVIDER_URL'),
           githubAppId: requireM1Value(config.GITHUB_APP_ID, 'GITHUB_APP_ID'),
           githubPrivateKeyPem: Buffer.from(
             requireM1Value(config.GITHUB_PRIVATE_KEY_BASE64, 'GITHUB_PRIVATE_KEY_BASE64'),
@@ -76,4 +92,15 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv): WorkerConfig {
 function requireM1Value(value: string | undefined, name: string): string {
   if (value === undefined) throw new Error(`${name}_REQUIRED_WHEN_M1_ENABLED`);
   return value;
+}
+
+function requireM1Number(value: number | undefined, name: string): number {
+  if (value === undefined) throw new Error(`${name}_REQUIRED_WHEN_M1_ENABLED`);
+  return value;
+}
+
+function decodeKey(value: string | undefined, name: string): Buffer {
+  const key = Buffer.from(requireM1Value(value, name), 'base64');
+  if (key.byteLength !== 32) throw new Error(`${name}_MUST_DECODE_TO_32_BYTES`);
+  return key;
 }

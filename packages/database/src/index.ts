@@ -5,6 +5,8 @@ import pg from 'pg';
 import { type DatabaseSchema } from './schema.js';
 
 export * from './schema.js';
+export * from './identityEmailOutbox.js';
+export * from './databaseClock.js';
 
 type PostgresHealthClient = Readonly<{
   end(): Promise<void>;
@@ -59,11 +61,16 @@ export async function withTenant<T>(
   operation: (transaction: DeliveryTransaction) => Promise<T>,
 ): Promise<T> {
   return database.transaction().execute(async (transaction) => {
-    await sql`select set_config('app.organization_id', ${organizationId}, true)`.execute(
-      transaction,
-    );
+    await setTenantContext(transaction, organizationId);
     return operation(transaction);
   });
+}
+
+export async function setTenantContext(
+  transaction: DeliveryTransaction,
+  organizationId: string,
+): Promise<void> {
+  await sql`select set_config('app.organization_id', ${organizationId}, true)`.execute(transaction);
 }
 
 export type OutboxEventInput = Readonly<{

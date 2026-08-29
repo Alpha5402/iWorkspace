@@ -8,6 +8,8 @@ import { GitHubAppProvider } from '@delivery/providers-github';
 
 import { AuthService } from './application/authService.js';
 import { ControlPlaneService } from './application/controlPlaneService.js';
+import { PublicAuthRateLimiter } from './application/publicAuthRateLimiter.js';
+import { RegistrationService } from './application/registrationService.js';
 import { createApp } from './app.js';
 import { loadApiConfig } from './config.js';
 
@@ -22,8 +24,15 @@ const readinessProbe = createReadinessProbe([
 const database = config.m1 === undefined ? undefined : createDatabase(config.databaseUrl);
 const artifactStore =
   config.m1 === undefined ? undefined : new ImmutableArtifactStore(config.objectStorage);
+const publicAuthRateLimiter =
+  config.m1 === undefined || database === undefined
+    ? undefined
+    : new PublicAuthRateLimiter(database, config.m1.tokenPepper);
 const m1Runtime =
-  config.m1 === undefined || database === undefined || artifactStore === undefined
+  config.m1 === undefined ||
+  database === undefined ||
+  artifactStore === undefined ||
+  publicAuthRateLimiter === undefined
     ? undefined
     : {
         auth: new AuthService(
@@ -31,6 +40,7 @@ const m1Runtime =
           new AccessTokenService(config.m1.authAccessKeys, 'iworkspace', 'iworkspace-access'),
           new RefreshTokenService(config.m1.authRefreshKeys, 'iworkspace', 'iworkspace-refresh'),
           config.m1.tokenPepper,
+          publicAuthRateLimiter,
         ),
         artifactStore,
         controlPlane: new ControlPlaneService(
@@ -41,6 +51,12 @@ const m1Runtime =
         github: new GitHubAppProvider(config.m1.githubAppId, config.m1.githubPrivateKeyPem),
         githubAppSlug: config.m1.githubAppSlug,
         githubWebhookSecret: config.m1.githubWebhookSecret,
+        registration: new RegistrationService(
+          database,
+          config.m1.tokenPepper,
+          config.m1.emailOutboxKey,
+          publicAuthRateLimiter,
+        ),
         secureCookies: process.env.NODE_ENV === 'production',
         webOrigin: config.m1.webOrigin,
       };

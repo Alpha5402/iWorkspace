@@ -18,7 +18,9 @@
     "@delivery/observability": "workspace:*",
     "@delivery/object-storage": "workspace:*",
     "@delivery/providers-agent": "workspace:*",
+    "@delivery/providers-email": "workspace:*",
     "@delivery/providers-github": "workspace:*",
+    "@delivery/security": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

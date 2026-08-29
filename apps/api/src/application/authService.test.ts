@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { type HttpError } from '../errors.js';
 import { AuthService, bootstrapFirstAdmin } from './authService.js';
+import { PublicAuthRateLimiter } from './publicAuthRateLimiter.js';
 
 const PEPPER = 'test-only-token-pepper-with-enough-entropy';
 
@@ -47,7 +48,13 @@ describe('AuthService', () => {
   beforeEach(async () => {
     database = await createMemoryDatabase();
     const tokens = createTokenServices();
-    auth = new AuthService(database, tokens.access, tokens.refresh, PEPPER);
+    auth = new AuthService(
+      database,
+      tokens.access,
+      tokens.refresh,
+      PEPPER,
+      new PublicAuthRateLimiter(database, PEPPER),
+    );
     ({ organizationId } = await bootstrapFirstAdmin({
       database,
       email: 'Owner@Example.com',
@@ -62,11 +69,16 @@ describe('AuthService', () => {
 
   it('logs in without exposing credentials and verifies the short-lived access token', async () => {
     await expect(
-      auth.login({ email: 'owner@example.com', password: 'wrong-password' }),
+      auth.login({
+        email: 'owner@example.com',
+        ipAddress: '192.0.2.10',
+        password: 'wrong-password',
+      }),
     ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS', status: 401 });
 
     const session = await auth.login({
       email: ' owner@example.com ',
+      ipAddress: '192.0.2.10',
       organizationId,
       password: 'correct horse battery staple',
     });
@@ -89,6 +101,7 @@ describe('AuthService', () => {
   it('rotates refresh tokens and commits family revocation when an old token is reused', async () => {
     const first = await auth.login({
       email: 'owner@example.com',
+      ipAddress: '192.0.2.11',
       password: 'correct horse battery staple',
     });
     const second = await auth.refresh(first.refreshToken);
@@ -108,6 +121,7 @@ describe('AuthService', () => {
   it('accepts a one-time invitation and rejects replay', async () => {
     const owner = await auth.login({
       email: 'owner@example.com',
+      ipAddress: '192.0.2.12',
       password: 'correct horse battery staple',
     });
     const actor = await auth.verifyAccessToken(owner.accessToken);
@@ -126,7 +140,11 @@ describe('AuthService', () => {
       auth.acceptInvitation({ password: 'another secure password', token: invitation.token }),
     ).rejects.toMatchObject({ code: 'INVITATION_INVALID', status: 410 });
     await expect(
-      auth.login({ email: 'member@example.com', password: 'another secure password' }),
+      auth.login({
+        email: 'member@example.com',
+        ipAddress: '192.0.2.13',
+        password: 'another secure password',
+      }),
     ).resolves.toMatchObject({ user: { organizationRole: 'MEMBER' } });
   });
 
@@ -141,6 +159,7 @@ describe('AuthService', () => {
     ).rejects.toThrow('BOOTSTRAP_ALREADY_COMPLETED');
     const session = await auth.login({
       email: 'owner@example.com',
+      ipAddress: '192.0.2.14',
       password: 'correct horse battery staple',
     });
     const actor = await auth.verifyAccessToken(session.accessToken);
@@ -158,6 +177,7 @@ describe('AuthService', () => {
   it('rejects access and refresh credentials immediately after account suspension', async () => {
     const session = await auth.login({
       email: 'owner@example.com',
+      ipAddress: '192.0.2.15',
       password: 'correct horse battery staple',
     });
     await database
@@ -189,11 +209,31 @@ describe('AuthService', () => {
       .executeTakeFirstOrThrow();
 
     await expect(
-      auth.login({ email: 'orphan@example.com', password: 'another secure password' }),
+      auth.login({
+        email: 'orphan@example.com',
+        ipAddress: '192.0.2.16',
+        password: 'another secure password',
+      }),
     ).rejects.toMatchObject({ code: 'ORGANIZATION_ACCESS_DENIED', status: 403 });
     await expect(auth.refresh('not-a-jwt')).rejects.toMatchObject({
       code: 'INVALID_REFRESH_TOKEN',
       status: 401,
+    });
+  });
+
+  it('rate limits repeated login attempts before password verification work', async () => {
+    const attempt = (): ReturnType<typeof auth.login> =>
+      auth.login({
+        email: 'missing@example.com',
+        ipAddress: '192.0.2.99',
+        password: 'incorrect password',
+      });
+    for (let index = 0; index < 10; index += 1) {
+      await expect(attempt()).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS', status: 401 });
+    }
+    await expect(attempt()).rejects.toMatchObject({
+      code: 'PUBLIC_AUTH_RATE_LIMITED',
+      status: 429,
     });
   });
 });

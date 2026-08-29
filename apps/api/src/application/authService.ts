@@ -11,6 +11,7 @@ import {
 } from '@delivery/security';
 
 import { HttpError } from '../errors.js';
+import { type PublicAuthRateLimiter } from './publicAuthRateLimiter.js';
 
 export type UserActor = Readonly<{
   organizationId: string;
@@ -34,11 +35,23 @@ export class AuthService {
     private readonly accessTokens: AccessTokenService,
     private readonly refreshTokens: RefreshTokenService,
     private readonly tokenPepper: string,
+    private readonly rateLimiter: PublicAuthRateLimiter,
   ) {}
 
   public async login(
-    input: Readonly<{ email: string; organizationId?: string | undefined; password: string }>,
+    input: Readonly<{
+      email: string;
+      ipAddress: string;
+      organizationId?: string | undefined;
+      password: string;
+    }>,
   ): Promise<SessionBundle> {
+    await this.rateLimiter.consume({
+      email: input.email,
+      ipAddress: input.ipAddress,
+      maximumHits: 10,
+      operation: 'LOGIN',
+    });
     const credential = await this.database
       .selectFrom('users')
       .innerJoin('user_password_credentials', 'user_password_credentials.user_id', 'users.id')
@@ -242,19 +255,26 @@ export class AuthService {
       }
       let user = await transaction
         .selectFrom('users')
-        .select('id')
+        .select(['id', 'status'])
         .where('email_canonical', '=', invitation.email_canonical)
         .executeTakeFirst();
       if (user === undefined) {
         user = await transaction
           .insertInto('users')
           .values({ email: invitation.email_canonical, status: 'ACTIVE' })
-          .returning('id')
+          .returning(['id', 'status'])
           .executeTakeFirstOrThrow();
         await transaction
           .insertInto('user_password_credentials')
           .values({ password_hash: await hashPassword(input.password), user_id: user.id })
           .executeTakeFirstOrThrow();
+      }
+      if (user.status !== 'ACTIVE') {
+        throw new HttpError(
+          409,
+          'EMAIL_VERIFICATION_REQUIRED',
+          'The account must complete email verification before joining an organization.',
+        );
       }
       await transaction
         .insertInto('organization_members')

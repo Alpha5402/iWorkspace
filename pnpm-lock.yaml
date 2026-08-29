@@ -191,9 +191,15 @@ importers:
       '@delivery/providers-agent':
         specifier: workspace:*
         version: link:../../packages/providers-agent
+      '@delivery/providers-email':
+        specifier: workspace:*
+        version: link:../../packages/providers-email
       '@delivery/providers-github':
         specifier: workspace:*
         version: link:../../packages/providers-github
+      '@delivery/security':
+        specifier: workspace:*
+        version: link:../../packages/security
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -265,6 +271,12 @@ importers:
         version: 10.3.1
 
   packages/providers-agent:
+    dependencies:
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  packages/providers-email:
     dependencies:
       zod:
         specifier: 4.4.3
