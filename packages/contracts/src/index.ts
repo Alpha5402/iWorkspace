@@ -74,6 +74,98 @@ export const EventEnvelopeV1Schema = z.object({
   traceparent: z.string().min(1).optional(),
 });
 
+const ProofArtifactSchema = z.object({
+  artifactId: z.uuid(),
+  artifactType: z.string().min(1),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  mediaType: z.string().min(1),
+  relativePath: z
+    .string()
+    .min(1)
+    .refine(
+      (value) => !value.startsWith('/') && !value.split('/').includes('..'),
+      'Artifact path must stay relative to the proof bundle.',
+    ),
+  sizeBytes: z.number().int().nonnegative(),
+});
+
+const ProofExecutionRecordSchema = z.object({
+  id: z.string().min(1),
+  kind: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()),
+  status: z.string().min(1),
+});
+
+export const M1ProofBundleManifestV1Schema = z.object({
+  artifacts: z.array(ProofArtifactSchema),
+  evidence: z.object({
+    links: z.array(
+      z.object({
+        childArtifactId: z.uuid(),
+        parentArtifactId: z.uuid(),
+        relation: z.string().min(1),
+      }),
+    ),
+    records: z.array(
+      z.object({
+        artifactId: z.uuid().nullable(),
+        evidenceType: z.string().min(1),
+        id: z.uuid(),
+        metadata: z.record(z.string(), z.unknown()),
+        sourceHash: z.string().min(1),
+      }),
+    ),
+  }),
+  execution: z.object({
+    attempts: z.array(ProofExecutionRecordSchema),
+    batches: z.array(ProofExecutionRecordSchema),
+    externalEffects: z.array(ProofExecutionRecordSchema),
+    findingVerifications: z.array(ProofExecutionRecordSchema),
+    findings: z.array(ProofExecutionRecordSchema),
+    providerInvocations: z.array(ProofExecutionRecordSchema),
+    runEvents: z.array(ProofExecutionRecordSchema),
+    tasks: z.array(ProofExecutionRecordSchema),
+  }),
+  exportedAt: z.iso.datetime(),
+  run: z.object({
+    baseSha: z.string().min(1).nullable(),
+    completedAt: z.iso.datetime().nullable(),
+    coverageComplete: z.boolean(),
+    diffHash: z.string().min(1).nullable(),
+    headSha: z.string().min(1).nullable(),
+    id: z.uuid(),
+    model: z.string().min(1),
+    organizationId: z.uuid(),
+    projectId: z.uuid(),
+    promptVersion: z.string().min(1),
+    pullRequestNumber: z.number().int().positive(),
+    repository: z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      owner: z.string().min(1),
+    }),
+    ruleset: z.object({
+      contentHash: z.string().min(1),
+      id: z.uuid(),
+      publishedAt: z.iso.datetime().nullable(),
+      status: z.enum(['DRAFT', 'PUBLISHED']),
+      version: z.number().int().positive(),
+    }),
+    startedAt: z.iso.datetime().nullable(),
+    status: RunStatusSchema,
+  }),
+  schemaVersion: z.literal(1),
+  verification: z.object({
+    artifactIntegrity: z.literal('VERIFIED'),
+    complete: z.boolean(),
+    missingArtifactTypes: z.array(z.string().min(1)),
+    missingEvidence: z.array(z.string().min(1)),
+    nonTerminalTaskIds: z.array(z.uuid()),
+    unresolvedExternalEffectIds: z.array(z.uuid()),
+    verificationLevel: z.literal('L2_RUNTIME_EVIDENCE'),
+  }),
+});
+
 export const CapabilityDefinitionSchema = z.object({
   id: z.string().min(1),
   path: z.string().startsWith('/'),
@@ -110,6 +202,7 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 export type EventEnvelopeV1 = z.infer<typeof EventEnvelopeV1Schema>;
 export type Finding = z.infer<typeof FindingSchema>;
+export type M1ProofBundleManifestV1 = z.infer<typeof M1ProofBundleManifestV1Schema>;
 export type ProjectTokenScope = z.infer<typeof ProjectTokenScopeSchema>;
 export type ReviewTrigger = z.infer<typeof ReviewTriggerSchema>;
 export type RuleDefinition = z.infer<typeof RuleDefinitionSchema>;

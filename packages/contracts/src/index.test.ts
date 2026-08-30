@@ -5,6 +5,7 @@ import {
   createOpenApiDocument,
   ErrorResponseSchema,
   HealthResponseSchema,
+  M1ProofBundleManifestV1Schema,
   RunStatusSchema,
 } from './index.js';
 
@@ -55,5 +56,24 @@ describe('contracts', () => {
   it('rejects malformed error and health responses', () => {
     expect(() => ErrorResponseSchema.parse({ error: { code: '', traceId: '' } })).toThrow();
     expect(() => HealthResponseSchema.parse({ service: '', status: 'unknown' })).toThrow();
+  });
+
+  it('keeps proof bundle artifact paths relative and content-addressed', () => {
+    const artifact = {
+      artifactId: 'fa24710d-379b-437c-a160-f30e0a541ee5',
+      artifactType: 'summary.txt',
+      contentHash: 'a'.repeat(64),
+      mediaType: 'text/plain',
+      relativePath: 'summary.txt',
+      sizeBytes: 10,
+    };
+
+    expect(M1ProofBundleManifestV1Schema.shape.artifacts.element.parse(artifact)).toEqual(artifact);
+    expect(() =>
+      M1ProofBundleManifestV1Schema.shape.artifacts.element.parse({
+        ...artifact,
+        relativePath: '../outside.txt',
+      }),
+    ).toThrow();
   });
 });

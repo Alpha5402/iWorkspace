@@ -16,6 +16,7 @@ export default defineConfig({
         '**/cli/benchmarkAdminUsers.ts',
         '**/cli/benchmarkReviewAcceptance.ts',
         '**/cli/bootstrapAdmin.ts',
+        '**/cli/exportM1ProofBundle.ts',
         '**/cli/reliabilityDrill*.ts',
         '**/cli/reviewCapacityBenchmark*.ts',
         '**/router.ts',

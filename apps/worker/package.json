@@ -8,6 +8,7 @@
     "build": "tsup src/main.ts --format esm --sourcemap --clean",
     "dev": "NODE_OPTIONS=--conditions=development tsx watch --env-file=../../.env src/main.ts",
     "drill:reliability": "NODE_OPTIONS=--conditions=development tsx --env-file=../../.env src/cli/reliabilityDrill.ts",
+    "export:m1-proof": "NODE_OPTIONS=--conditions=development tsx --env-file=../../.env src/cli/exportM1ProofBundle.ts",
     "start": "node --env-file=../../.env dist/main.js",
     "typecheck": "tsc --noEmit"
   },

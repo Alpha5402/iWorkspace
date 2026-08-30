@@ -30,6 +30,7 @@
     "infra:up": "docker compose --env-file .env -f infra/compose/docker-compose.yml up -d --wait postgres rabbitmq minio jaeger otel-collector && docker compose --env-file .env -f infra/compose/docker-compose.yml run --rm minio-init",
     "db:migrate": "pnpm --filter @delivery/database migrate up",
     "lint": "eslint . --max-warnings 0",
+    "proof:m1": "pnpm --filter @delivery/worker export:m1-proof",
     "quality": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm check:architecture && pnpm check:dead-code && pnpm check:duplication && pnpm build",
     "quality:milestone": "pnpm quality && pnpm test:mutation",
     "start:api": "pnpm --filter @delivery/api start",

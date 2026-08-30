@@ -289,6 +289,7 @@ infra/
 - [x] 建立 Review 接受路径容量 Harness：在一次性 PostgreSQL 上通过真实 HTTP API 完成 10,000 次触发，100 并发下 10,000/10,000 返回 `202`，保持 100 个活跃 Run，p95 128.29ms、吞吐 791.31 req/s；同时核对 Run/Task/Outbox/Audit 各 10,000 条、数据库无死锁/回滚/等待锁。脱敏运行证据归档于本地 `.workspace/proofs/`，该目录不提交仓库。
 - [x] 将 Worker 强杀、Fencing 接管、RabbitMQ 重启、真实 DLQ 与安全重放固化为可重复 Harness；默认连续两轮创建/迁移/删除隔离数据库，两轮均验证单一 External Effect、七类固定 Artifact、旧 Attempt 拒绝和全部队列归零。
 - [x] 建立完整 Review 容量 Harness：在一次性 PostgreSQL 上预置 100 个活跃 Run，以 8 个真实 Worker 进程、RabbitMQ 和 MinIO 完成四阶段 DAG；100/100 Run、400/400 Task/Inbox、300/300 Provider 调用、700 个 Artifact 与 100 个 External Effect 全部成功。Provider 全局/单项目并发稳定限制为 4/2，等待 p95 4.30s、零等待超时；`review.analyze` 峰值 88，主队列和 DLQ 最终归零；总耗时 25.89s。受控 Stub 记录 36k 输入/9k 输出 Token，按 2026-08-30 DeepSeek V4 Flash 峰值 cache-miss 价格推演约 `$0.02772`。该证据是本地真实基础设施基线，不包含真实 GitHub/DeepSeek 延迟、限额或实际账单，不冒充 L3 Provider 验收。
+- [x] 建立版本化 M1 Proof Bundle 导出器：按组织租户上下文读取冻结 Run/Ruleset、Task/Attempt、Batch、Provider Invocation、Finding/Verify、Run Event、Evidence、Artifact Link 与 External Effect；从对象存储下载每个 Artifact 并复核 SHA-256/大小，临时目录完整写入后才原子提升。清单固定标记为 `L2_RUNTIME_EVIDENCE`，缺少冻结输入、已发布规则、Task、Provider 调用、External Effect、固定 Artifact 或存在非终态时必须 `complete=false`，不能据此伪称真实 Provider L3。
 - [ ] 使用真实 GitHub App、测试仓库和 DeepSeek 跑通 Webhook 与 Action Token 两条 L3 路径。
 - [ ] 运行本仓库 Dogfooding，并整理“需求 → 运行证据”的 M1 Proof Bundle。
 
