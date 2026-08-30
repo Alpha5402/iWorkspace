@@ -1,6 +1,6 @@
 # AI Delivery Control Plane 总体 TODO
 
-> 状态：M0 已完成。M1 原邀请制主闭环与 L2 自动化验证已完成；公开注册、邮箱验证、个人 Organization、PostgreSQL 限流、JWT 双 Token、平台管理员后台、组织切换、设备会话、密码变更撤销、非敏感 Token 元数据、统一 Principal、Artifact GC 与 Ruleset 版本编辑的 L2 已落地。HTTP 接受路径、管理员查询容量基线及可重复进程/基础设施故障演练已完成；端到端 Provider 容量、浏览器身份闭环、真实 GitHub/DeepSeek 和 Dogfooding Proof Bundle（L3）仍待完成。M2、M3 未开始。
+> 状态：M0 已完成。M1 原邀请制主闭环与 L2 自动化验证已完成；公开注册、邮箱验证、个人 Organization、PostgreSQL 限流、JWT 双 Token、平台管理员后台、后台新增管理员邀请、组织切换、设备会话、密码变更撤销、非敏感 Token 元数据、统一 Principal、Artifact GC 与 Ruleset 版本编辑的 L2 已落地。HTTP 接受路径、管理员查询、完整 Review 容量基线及可重复进程/基础设施故障演练已完成；浏览器身份闭环、真实 GitHub/DeepSeek 和 Dogfooding Proof Bundle（L3）仍待完成。M2、M3 未开始。
 
 ## 0. 项目目标与阶段顺序
 
@@ -331,6 +331,25 @@ infra/
 - [x] Vue 3 新增注册、邮箱验证、组织切换和 `/admin/users` 页面；路由守卫只改善体验，后端必须独立执行完整授权。
 - [x] 管理员后台对高风险操作提供二次确认，并清楚区分平台角色、组织角色和项目角色。
 
+#### 后台新增管理员
+
+- [x] 在 `/admin/users` 提供“新增管理员”入口，但仅允许当前有效的 `SUPER_ADMIN` 操作；平台 `ADMIN` 无权创建、授予或撤销其他平台管理员。
+- [x] 对尚未注册的邮箱创建一次性 `PLATFORM_ADMIN` 邀请，而不是由后台代设、展示或传递初始密码；受邀者必须验证邮箱并自行设置密码后，账户才进入 `ACTIVE + ADMIN`。
+- [x] 对已经存在且处于 `ACTIVE` 的普通用户，不重复创建账户；引导 `SUPER_ADMIN` 使用现有的显式角色授予流程，并要求填写原因、二次确认和记录 Audit Event。
+- [x] 邀请默认 24 小时过期，只保存 Token 摘要；同一规范化邮箱同时最多存在一个有效管理员邀请。重复请求使用幂等键返回同一逻辑结果，已消费、已撤销或已过期 Token 不可重放。
+- [x] 提供有界的管理员邀请列表、撤销和重发能力；重发必须使旧 Token 失效，邮件继续通过 Identity Outbox 与 Email Provider Port 异步发送，不在响应、日志或数据库明文列暴露 Token。
+- [x] 接受邀请时在同一事务内完成用户创建或状态确认、邮箱验证、平台角色授予、个人 Organization/OWNER Membership 创建及 Audit Event；任一步失败均不得留下半激活管理员。
+- [x] 新增版本化 API 契约：`POST/GET /api/v1/admin/administrator-invitations`、`POST /api/v1/admin/administrator-invitations/:id/resend`、`DELETE /api/v1/admin/administrator-invitations/:id`，以及无需登录但受限流保护的邀请接受接口。
+- [x] 管理后台展示邀请的邮箱、状态、创建人、创建/过期时间和最后发送结果，不返回 Token、密码哈希、Refresh JTI 或邮件密文；所有创建、重发、撤销、接受和角色落地操作均进入审计链。
+
+##### 决策：邀请激活，而非管理员代设密码
+
+- **目的**：让 `SUPER_ADMIN` 能从后台新增管理员，同时保证新管理员本人控制登录凭据，并保留邮箱归属验证、角色来源和完整审计血缘。
+- **选择**：后台创建带目标角色的短期一次性邀请；受邀者完成邮箱验证和密码设置后才原子激活为 `ADMIN`。既有用户继续走显式角色授予，不复用邀请绕过账户状态检查。
+- **不选择**：不允许后台录入或生成初始密码，不创建无需验证即可登录的 `ACTIVE` 管理员，也不允许普通 `ADMIN` 继续扩散平台管理权限；这些方案会扩大凭据泄露、账户接管和权限横向扩散风险。
+- **Trade-off**：新增邀请表、生命周期、到期判定、Email Outbox 事件和前端接受页，管理员不能在无邮件投递能力时立即交付账户；换取无共享密码、可撤销、可幂等且可审计的管理员建立过程。
+- **验证**：覆盖并发重复邀请、既有邮箱、邀请与注册争抢、Token 重放/过期/撤销、重发使旧 Token 失效、普通 `ADMIN` 越权、最后一个 `SUPER_ADMIN` 保护、日志与数据库无明文，以及接受邀请后 Access/Refresh JWT 登录和撤销路径。
+
 #### 数据库与迁移
 
 - [x] 通过前向 Migration 扩展用户状态与平台角色，新增邮箱验证、Session/JTI、角色变更和限流数据；禁止修改已发布 Migration。
@@ -387,13 +406,17 @@ infra/
 - [x] 覆盖越权提权、最后一个 `SUPER_ADMIN` 保护、管理员不能隐式读取租户项目、跨组织切换和停用后的即时授权拒绝。
 - [x] 管理员用户列表验证游标分页稳定性、敏感字段缺失和操作审计。
 - [x] 使用 100,000 个合成用户验证管理员查询：通过受限 `iw_platform_admin` 角色对未筛选、停用状态、管理员角色和精确邮箱场景各执行 100 次真实 `AdminService` 调用，p95 分别为 1.99ms、2.49ms、3.84ms、1.94ms；EXPLAIN 均命中预期索引。新增单个 `(created_at DESC, id DESC)` 索引约 3.88MiB，避免为低频筛选叠加多个高写放大的组合索引；脱敏证据归档于本地 `.workspace/proofs/`。
+- [x] 覆盖后台新增管理员的 API、数据库、Email Outbox、权限、幂等和审计测试，并通过空库迁移、升级迁移及完整 L2 质量门禁。
 - [ ] 浏览器真实跑通“公开注册 → 邮箱验证 → 登录 → 切换组织 → 管理员查询/停用用户 → Session 失效”，不使用前端 Mock 作为完成证据。
+- [ ] 浏览器真实跑通“`SUPER_ADMIN` 新增管理员 → 受邀者验证邮箱并设置密码 → JWT 双 Token 登录 → 后台撤销其 Session/角色”，不使用前端 Mock 或直接改库作为完成证据。
 - [x] Identity、Security 核心分支覆盖率继续不低于 90%，并通过完整 `pnpm quality`、空库迁移和升级迁移测试。
 
 ### M1 退出门槛
 
 - [x] 原邀请制身份与 Review 主闭环的数据库迁移、约束、安全测试、集成测试和质量门禁已通过（旧 L2 基线）。
 - [x] 公开注册、平台用户分层、管理员后台、组织切换、设备会话与 JWT 双 Token 主路径通过新的 L2 验收。
+- [x] 后台新增管理员邀请通过 L2 自动化验证；后台不能接触受邀者密码或可重放的邀请凭据。
+- [ ] 后台新增管理员邀请通过浏览器真实身份闭环。
 - [ ] 真实 GitHub Action/Webhook → Review → GitHub Check 链路通过（L3）。
 - [x] 真实进程/基础设施故障注入已由仓库内 Harness 连续两轮稳定通过（L3）；该结论不包含真实 GitHub/DeepSeek Provider。
 - [ ] 本仓库 Dogfooding Artifact 与 M1 Proof Bundle 已保存（L3）。

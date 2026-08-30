@@ -3,9 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { EmailProviderError, HttpEmailProvider } from './index.js';
 
 const message = {
+  actionUrl: 'https://web.example.test/verify-email?token=secret',
   deliveryId: 'delivery-1',
   recipientEmail: 'user@example.com',
-  verificationUrl: 'https://web.example.test/verify-email?token=secret',
+  template: 'verify-email' as const,
 };
 
 describe('HttpEmailProvider', () => {
@@ -24,12 +25,18 @@ describe('HttpEmailProvider', () => {
     };
     const provider = new HttpEmailProvider('https://email.example.test/send', 'api-key', request);
 
-    await expect(provider.sendVerificationEmail(message)).resolves.toEqual({
+    await expect(provider.sendIdentityEmail(message)).resolves.toEqual({
       providerMessageId: 'provider-message-1',
     });
     expect(receivedInput).toBe('https://email.example.test/send');
     expect(receivedInit?.method).toBe('POST');
     expect(new Headers(receivedInit?.headers).get('idempotency-key')).toBe('delivery-1');
+    if (typeof receivedInit?.body !== 'string') throw new Error('EMAIL_REQUEST_BODY_REQUIRED');
+    const requestBody: unknown = JSON.parse(receivedInit.body);
+    expect(requestBody).toMatchObject({
+      template: 'verify-email',
+      variables: { verificationUrl: message.actionUrl },
+    });
   });
 
   it('classifies throttling, server failures, invalid responses, and network errors', async () => {
@@ -40,7 +47,7 @@ describe('HttpEmailProvider', () => {
         .fn<typeof fetch>()
         .mockResolvedValue(new Response('', { headers: { 'retry-after': '2' }, status: 429 })),
     );
-    await expect(throttled.sendVerificationEmail(message)).rejects.toMatchObject({
+    await expect(throttled.sendIdentityEmail(message)).rejects.toMatchObject({
       code: 'EMAIL_PROVIDER_HTTP_429',
       retryAfterMilliseconds: 2_000,
       retryable: true,
@@ -51,7 +58,7 @@ describe('HttpEmailProvider', () => {
       'api-key',
       vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 400 })),
     );
-    await expect(rejected.sendVerificationEmail(message)).rejects.toMatchObject({
+    await expect(rejected.sendIdentityEmail(message)).rejects.toMatchObject({
       code: 'EMAIL_PROVIDER_HTTP_400',
       retryable: false,
     });
@@ -61,7 +68,7 @@ describe('HttpEmailProvider', () => {
       'api-key',
       vi.fn<typeof fetch>().mockResolvedValue(new Response('not-json', { status: 200 })),
     );
-    await expect(invalid.sendVerificationEmail(message)).rejects.toMatchObject({
+    await expect(invalid.sendIdentityEmail(message)).rejects.toMatchObject({
       code: 'EMAIL_PROVIDER_RESPONSE_INVALID',
       retryable: false,
     });
@@ -71,7 +78,7 @@ describe('HttpEmailProvider', () => {
       'api-key',
       vi.fn<typeof fetch>().mockRejectedValue(new Error('network secret')),
     );
-    await expect(unavailable.sendVerificationEmail(message)).rejects.toMatchObject({
+    await expect(unavailable.sendIdentityEmail(message)).rejects.toMatchObject({
       code: 'EMAIL_PROVIDER_UNAVAILABLE',
       retryable: true,
     });

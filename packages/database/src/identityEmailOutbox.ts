@@ -9,15 +9,15 @@ export type ClaimedIdentityEmail = Readonly<{
   aad: string;
   attemptCount: number;
   ciphertext: string;
+  credentialActive: boolean;
   encryptedDek: string;
   id: string;
   iv: string;
   keyVersion: number;
   maxAttempts: number;
+  messageType: 'ADMINISTRATOR_INVITATION' | 'VERIFY_EMAIL';
   recipientEmail: string;
   tag: string;
-  verificationTokenId: string;
-  verificationTokenActive: boolean;
   wrapIv: string;
   wrapTag: string;
 }>;
@@ -32,10 +32,15 @@ export async function claimIdentityEmailDeliveries(
     const databaseNow = await getDatabaseNow(transaction);
     const candidates = await transaction
       .selectFrom('identity_email_outbox')
-      .innerJoin(
+      .leftJoin(
         'email_verification_tokens',
         'email_verification_tokens.id',
         'identity_email_outbox.verification_token_id',
+      )
+      .leftJoin(
+        'administrator_invitations',
+        'administrator_invitations.id',
+        'identity_email_outbox.administrator_invitation_id',
       )
       .select([
         'identity_email_outbox.aad',
@@ -47,14 +52,21 @@ export async function claimIdentityEmailDeliveries(
         'identity_email_outbox.iv',
         'identity_email_outbox.key_version',
         'identity_email_outbox.max_attempts',
+        'identity_email_outbox.message_type',
         'identity_email_outbox.recipient_email',
         'identity_email_outbox.tag',
-        'identity_email_outbox.verification_token_id',
         'identity_email_outbox.wrap_iv',
         'identity_email_outbox.wrap_tag',
-        sql<boolean>`email_verification_tokens.consumed_at is null
-          and email_verification_tokens.superseded_at is null
-          and email_verification_tokens.expires_at > now()`.as('verification_token_active'),
+        sql<boolean>`case
+          when identity_email_outbox.message_type = 'VERIFY_EMAIL' then
+            email_verification_tokens.consumed_at is null
+            and email_verification_tokens.superseded_at is null
+            and email_verification_tokens.expires_at > now()
+          when identity_email_outbox.message_type = 'ADMINISTRATOR_INVITATION' then
+            administrator_invitations.status = 'PENDING'
+            and administrator_invitations.expires_at > now()
+          else false
+        end`.as('credential_active'),
       ])
       .where((expression) =>
         expression.or([
@@ -91,15 +103,15 @@ export async function claimIdentityEmailDeliveries(
       aad: candidate.aad,
       attemptCount: candidate.attempt_count + 1,
       ciphertext: candidate.ciphertext,
+      credentialActive: candidate.credential_active,
       encryptedDek: candidate.encrypted_dek,
       id: candidate.id,
       iv: candidate.iv,
       keyVersion: candidate.key_version,
       maxAttempts: candidate.max_attempts,
+      messageType: candidate.message_type,
       recipientEmail: candidate.recipient_email,
       tag: candidate.tag,
-      verificationTokenId: candidate.verification_token_id,
-      verificationTokenActive: candidate.verification_token_active,
       wrapIv: candidate.wrap_iv,
       wrapTag: candidate.wrap_tag,
     }));

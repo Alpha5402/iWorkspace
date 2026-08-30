@@ -6,9 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Component } from 'vue';
 
 const mocks = vi.hoisted(() => ({
+  acceptAdministratorInvitation: vi.fn(),
   acceptInvitation: vi.fn(),
   artifactDownloadUrl: vi.fn((id: string) => `/artifacts/${id}`),
   changePassword: vi.fn(),
+  createAdministratorInvitation: vi.fn(),
   createProject: vi.fn(),
   createRepositoryConnection: vi.fn(),
   createRuleset: vi.fn(),
@@ -16,10 +18,12 @@ const mocks = vi.hoisted(() => ({
   createToken: vi.fn(),
   disconnectRepositoryConnection: vi.fn(),
   eventUrl: vi.fn((id: string) => `/events/${id}`),
+  getCurrentActor: vi.fn(),
   getGitHubInstallUrl: vi.fn(),
   getPlatformUser: vi.fn(),
   getReview: vi.fn(),
   listArtifacts: vi.fn(),
+  listAdministratorInvitations: vi.fn(),
   listFindings: vi.fn(),
   listOrganizations: vi.fn(),
   listPlatformUsers: vi.fn(),
@@ -35,6 +39,8 @@ const mocks = vi.hoisted(() => ({
   publishRuleset: vi.fn(),
   register: vi.fn(),
   resendVerification: vi.fn(),
+  resendAdministratorInvitation: vi.fn(),
+  revokeAdministratorInvitation: vi.fn(),
   revokePlatformUserSessions: vi.fn(),
   revokeSession: vi.fn(),
   setDefaultRulesetVersion: vi.fn(),
@@ -49,6 +55,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../api/client.js', () => ({ apiClient: mocks }));
 
 import AccountView from './AccountView.vue';
+import AdministratorInvitationAcceptView from './AdministratorInvitationAcceptView.vue';
 import AdminUsersView from './AdminUsersView.vue';
 import InvitationAcceptView from './InvitationAcceptView.vue';
 import LoginView from './LoginView.vue';
@@ -70,6 +77,7 @@ async function mountAt(
       { component, path: '/verify-email' },
       { component, path: '/account' },
       { component, path: '/admin/users' },
+      { component, path: '/administrator-invitations/accept' },
       { component, path: '/invitations/accept' },
       { component, path: '/projects' },
       { component, path: '/projects/:projectId' },
@@ -90,8 +98,13 @@ describe('M1 management views', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acceptAdministratorInvitation.mockResolvedValue(undefined);
     mocks.acceptInvitation.mockResolvedValue(undefined);
     mocks.changePassword.mockResolvedValue({ revokedFamilies: 1 });
+    mocks.createAdministratorInvitation.mockResolvedValue({
+      duplicate: false,
+      invitation: { id: 'administrator-invitation', status: 'PENDING' },
+    });
     mocks.createProject.mockResolvedValue({ id: 'project' });
     mocks.createRepositoryConnection.mockResolvedValue(undefined);
     mocks.createRuleset.mockResolvedValue({ rulesetId: 'ruleset', versionId: 'version' });
@@ -99,17 +112,25 @@ describe('M1 management views', () => {
     mocks.createToken.mockResolvedValue({ token: 'one-time-token' });
     mocks.disconnectRepositoryConnection.mockResolvedValue(undefined);
     mocks.getGitHubInstallUrl.mockResolvedValue('https://github.test/install');
-    mocks.getPlatformUser.mockResolvedValue({
-      createdAt: '2026-01-01T00:00:00.000Z',
-      email: 'user@example.com',
-      id: 'user',
-      memberships: [{ organizationName: 'Personal', role: 'OWNER' }],
-      platformRole: 'USER',
-      sessions: [{ familyId: 'family' }],
-      status: 'ACTIVE',
-      tokens: [],
-      updatedAt: '2026-01-01T00:00:00.000Z',
+    mocks.getCurrentActor.mockResolvedValue({
+      organizationId: 'organization',
+      sessionId: 'session',
+      type: 'USER_SESSION',
+      userId: 'super',
     });
+    mocks.getPlatformUser.mockImplementation((targetUserId: string) =>
+      Promise.resolve({
+        createdAt: '2026-01-01T00:00:00.000Z',
+        email: targetUserId === 'super' ? 'super@example.com' : 'user@example.com',
+        id: targetUserId,
+        memberships: [{ organizationName: 'Personal', role: 'OWNER' }],
+        platformRole: targetUserId === 'super' ? 'SUPER_ADMIN' : 'USER',
+        sessions: [{ familyId: 'family' }],
+        status: 'ACTIVE',
+        tokens: [],
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
     mocks.getReview.mockResolvedValue({
       coverage_complete: true,
       head_sha: 'head',
@@ -118,6 +139,20 @@ describe('M1 management views', () => {
     mocks.listArtifacts.mockResolvedValue([
       { artifactType: 'summary.txt', contentHash: 'hash', id: 'artifact' },
     ]);
+    mocks.listAdministratorInvitations.mockResolvedValue({
+      invitations: [
+        {
+          createdAt: '2026-01-01T00:00:00.000Z',
+          createdBy: 'super',
+          delivery: { status: 'SENT' },
+          email: 'invited@example.com',
+          expiresAt: '2026-01-02T00:00:00.000Z',
+          id: 'administrator-invitation',
+          status: 'PENDING',
+          targetRole: 'ADMIN',
+        },
+      ],
+    });
     mocks.listFindings.mockResolvedValue([
       {
         description: 'description',
@@ -209,6 +244,14 @@ describe('M1 management views', () => {
     mocks.publishRuleset.mockResolvedValue(undefined);
     mocks.register.mockResolvedValue(undefined);
     mocks.resendVerification.mockResolvedValue(undefined);
+    mocks.resendAdministratorInvitation.mockResolvedValue({
+      id: 'administrator-invitation',
+      status: 'PENDING',
+    });
+    mocks.revokeAdministratorInvitation.mockResolvedValue({
+      id: 'administrator-invitation',
+      status: 'REVOKED',
+    });
     mocks.revokePlatformUserSessions.mockResolvedValue({ revokedFamilies: 1 });
     mocks.revokeSession.mockResolvedValue({ currentSessionRevoked: false });
     mocks.setDefaultRulesetVersion.mockResolvedValue(undefined);
@@ -242,6 +285,57 @@ describe('M1 management views', () => {
     await flushPromises();
     expect(mocks.acceptInvitation).toHaveBeenCalledWith('invite-token', 'another secure password');
     expect(invitation.router.currentRoute.value.path).toBe('/login');
+  });
+
+  it('accepts a platform administrator invitation without issuing a browser session implicitly', async () => {
+    const acceptance = await mountAt(
+      AdministratorInvitationAcceptView,
+      '/administrator-invitations/accept?token=administrator-invitation-token',
+    );
+    await acceptance.wrapper.find('input').setValue('another secure password');
+    await acceptance.wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(mocks.acceptAdministratorInvitation).toHaveBeenCalledWith(
+      'administrator-invitation-token',
+      'another secure password',
+    );
+    expect(acceptance.router.currentRoute.value.path).toBe('/login');
+  });
+
+  it('rejects incomplete administrator invitation links and renders opaque acceptance failures', async () => {
+    const missing = await mountAt(
+      AdministratorInvitationAcceptView,
+      '/administrator-invitations/accept',
+    );
+    expect(missing.wrapper.text()).toContain('邀请链接不完整');
+
+    const incomplete = await mountAt(
+      AdministratorInvitationAcceptView,
+      '/administrator-invitations/accept?token=short',
+    );
+    expect(incomplete.wrapper.text()).toContain('邀请链接不完整');
+    expect(incomplete.wrapper.find('form').exists()).toBe(false);
+
+    mocks.acceptAdministratorInvitation.mockRejectedValueOnce('opaque failure');
+    const rejected = await mountAt(
+      AdministratorInvitationAcceptView,
+      '/administrator-invitations/accept?token=administrator-invitation-token',
+    );
+    await rejected.wrapper.find('input').setValue('another secure password');
+    await rejected.wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(rejected.wrapper.find('[role="alert"]').text()).toBe('管理员邀请接受失败');
+    expect(rejected.router.currentRoute.value.path).toBe('/administrator-invitations/accept');
+
+    mocks.acceptAdministratorInvitation.mockRejectedValueOnce(new Error('invitation expired'));
+    const expired = await mountAt(
+      AdministratorInvitationAcceptView,
+      '/administrator-invitations/accept?token=administrator-invitation-token',
+    );
+    await expired.wrapper.find('input').setValue('another secure password');
+    await expired.wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(expired.wrapper.find('[role="alert"]').text()).toBe('invitation expired');
   });
 
   it('loads and creates projects, then renders service errors', async () => {
@@ -494,7 +588,7 @@ describe('M1 management views', () => {
       ?.trigger('click');
     await flushPromises();
     expect(mocks.getPlatformUser).toHaveBeenCalledWith('user');
-    await wrapper.find('input[required]').setValue('Support delegation');
+    await wrapper.find('input[name="user-management-reason"]').setValue('Support delegation');
     await wrapper
       .findAll('button')
       .find((button) => button.text() === '授予 ADMIN')
@@ -519,7 +613,8 @@ describe('M1 management views', () => {
     });
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const { wrapper } = await mountAt(AdminUsersView, '/admin/users');
-    const form = wrapper.find('form');
+    const form = wrapper.findAll('form').find((candidate) => candidate.text().includes('有界查询'));
+    if (form === undefined) throw new Error('USER_QUERY_FORM_REQUIRED');
     await form.find('input[type="email"]').setValue('USER@example.com');
     const selects = form.findAll('select');
     await selects[0]?.setValue('ACTIVE');
@@ -538,7 +633,7 @@ describe('M1 management views', () => {
       .find((candidate) => candidate.text().includes('user@example.com'))
       ?.trigger('click');
     await flushPromises();
-    await wrapper.find('input[required]').setValue('Security response');
+    await wrapper.find('input[name="user-management-reason"]').setValue('Security response');
     await wrapper
       .findAll('button')
       .find((candidate) => candidate.text() === '停用账户')
@@ -562,5 +657,63 @@ describe('M1 management views', () => {
       .find((candidate) => candidate.text() === '恢复账户')
       ?.trigger('click');
     expect(mocks.setPlatformUserStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates, resends, and revokes administrator invitations only after confirmation', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { wrapper } = await mountAt(AdminUsersView, '/admin/users');
+    await wrapper.find('input[name="administrator-email"]').setValue('new-admin@example.com');
+    const reason = wrapper.find('input[name="administrator-invitation-reason"]');
+    const form = wrapper.find('form:has(input[name="administrator-email"])');
+    await reason.setValue('no');
+    await form.trigger('submit');
+    expect(confirm).not.toHaveBeenCalled();
+    await reason.setValue('Add platform operator');
+    await form.trigger('submit');
+    expect(mocks.createAdministratorInvitation).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    await form.trigger('submit');
+    await flushPromises();
+    expect(mocks.createAdministratorInvitation).toHaveBeenCalledWith(
+      'new-admin@example.com',
+      'Add platform operator',
+    );
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '重发')
+      ?.trigger('click');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '撤销')
+      ?.trigger('click');
+    await flushPromises();
+    expect(mocks.resendAdministratorInvitation).toHaveBeenCalledWith(
+      'administrator-invitation',
+      'Add platform operator',
+    );
+    expect(mocks.revokeAdministratorInvitation).toHaveBeenCalledWith(
+      'administrator-invitation',
+      'Add platform operator',
+    );
+  });
+
+  it('keeps administrator invitations read-only for a platform ADMIN', async () => {
+    mocks.getPlatformUser.mockResolvedValueOnce({
+      createdAt: '2026-01-01T00:00:00.000Z',
+      email: 'operator@example.com',
+      id: 'super',
+      memberships: [],
+      platformRole: 'ADMIN',
+      sessions: [],
+      status: 'ACTIVE',
+      tokens: [],
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const { wrapper } = await mountAt(AdminUsersView, '/admin/users');
+
+    expect(wrapper.text()).toContain('仅 SUPER_ADMIN 可以新增、重发或撤销平台管理员邀请');
+    expect(wrapper.find('input[name="administrator-email"]').exists()).toBe(false);
+    expect(wrapper.findAll('button').some((button) => button.text() === '重发')).toBe(false);
+    expect(mocks.listAdministratorInvitations).toHaveBeenCalled();
   });
 });

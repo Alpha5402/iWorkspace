@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  acquireIdentityEmailLock,
   type DeliveryDatabase,
   type DeliveryTransaction,
   getDatabaseNow,
   setTenantContext,
 } from '@delivery/database';
-import { encryptSecret, hashOpaqueToken, hashPassword, issueOpaqueToken } from '@delivery/security';
+import { hashOpaqueToken, hashPassword, issueOpaqueToken } from '@delivery/security';
 import { HttpError } from '../errors.js';
+import { enqueueIdentityEmail } from './identityEmailDelivery.js';
 import { type PublicAuthRateLimiter } from './publicAuthRateLimiter.js';
 
 const VERIFICATION_TTL_MILLISECONDS = 30 * 60 * 1_000;
@@ -29,7 +31,8 @@ export class RegistrationService {
   ): Promise<PublicRegistrationResult> {
     const email = canonicalizeEmail(input.email);
     await this.rateLimiter.consume({
-      email,
+      identity: email,
+      identityDimension: 'EMAIL',
       ipAddress: input.ipAddress,
       maximumHits: REGISTRATION_LIMIT,
       operation: 'REGISTER',
@@ -37,6 +40,16 @@ export class RegistrationService {
     const passwordHash = await hashPassword(input.password);
 
     return this.database.transaction().execute(async (transaction) => {
+      await acquireIdentityEmailLock(transaction, email);
+      const databaseNow = await getDatabaseNow(transaction);
+      const administratorInvitation = await transaction
+        .selectFrom('administrator_invitations')
+        .select('id')
+        .where('email_canonical', '=', email)
+        .where('status', '=', 'PENDING')
+        .where('expires_at', '>', databaseNow)
+        .executeTakeFirst();
+      if (administratorInvitation !== undefined) return { accepted: true };
       const user = await transaction
         .insertInto('users')
         .values({ email, platform_role: 'USER', status: 'PENDING_VERIFICATION' })
@@ -59,7 +72,8 @@ export class RegistrationService {
   ): Promise<PublicRegistrationResult> {
     const email = canonicalizeEmail(input.email);
     await this.rateLimiter.consume({
-      email,
+      identity: email,
+      identityDimension: 'EMAIL',
       ipAddress: input.ipAddress,
       maximumHits: RESEND_LIMIT,
       operation: 'RESEND_VERIFICATION',
@@ -176,7 +190,6 @@ export class RegistrationService {
     email: string,
   ): Promise<void> {
     const verificationId = randomUUID();
-    const deliveryId = randomUUID();
     const issued = issueOpaqueToken('iwverify', this.tokenPepper);
     const databaseNow = await getDatabaseNow(transaction);
     await transaction
@@ -190,34 +203,12 @@ export class RegistrationService {
         user_id: userId,
       })
       .executeTakeFirstOrThrow();
-    const encrypted = encryptSecret({
-      aad: `identity-email:${deliveryId}`,
-      keyEncryptionKey: this.emailOutboxKey.key,
-      keyVersion: this.emailOutboxKey.version,
-      plaintext: issued.token,
+    await enqueueIdentityEmail(transaction, {
+      encryptionKey: this.emailOutboxKey,
+      plaintextToken: issued.token,
+      recipientEmail: email,
+      target: { messageType: 'VERIFY_EMAIL', verificationTokenId: verificationId },
     });
-    await transaction
-      .insertInto('identity_email_outbox')
-      .values({
-        aad: encrypted.aad,
-        ciphertext: encrypted.ciphertext,
-        claimed_by: null,
-        claimed_until: null,
-        encrypted_dek: encrypted.encryptedDek,
-        id: deliveryId,
-        iv: encrypted.iv,
-        key_version: encrypted.keyVersion,
-        last_error_code: null,
-        message_type: 'VERIFY_EMAIL',
-        provider_message_id: null,
-        recipient_email: email,
-        sent_at: null,
-        tag: encrypted.tag,
-        verification_token_id: verificationId,
-        wrap_iv: encrypted.wrapIv,
-        wrap_tag: encrypted.wrapTag,
-      })
-      .executeTakeFirstOrThrow();
   }
 }
 

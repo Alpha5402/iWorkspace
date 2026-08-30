@@ -17,6 +17,7 @@ import { z } from 'zod';
 
 import { type AuthService, type SessionBundle } from '../application/authService.js';
 import { type AdminService } from '../application/adminService.js';
+import { type AdministratorInvitationService } from '../application/administratorInvitationService.js';
 import { type ControlPlaneService } from '../application/controlPlaneService.js';
 import { type RegistrationService } from '../application/registrationService.js';
 import { HttpError } from '../errors.js';
@@ -38,6 +39,15 @@ const AdminUserListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   platformRole: z.enum(['SUPER_ADMIN', 'ADMIN', 'USER']).optional(),
   status: z.enum(['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED']).optional(),
+});
+const AdministratorInvitationListQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  status: z.enum(['PENDING', 'ACCEPTED', 'REVOKED', 'EXPIRED']).optional(),
+});
+const AdministratorInvitationSchema = z.object({
+  email: z.email(),
+  reason: z.string().trim().min(3).max(500),
 });
 const ReasonSchema = z.string().trim().min(3).max(500);
 const PasswordChangeSchema = z.object({
@@ -117,6 +127,14 @@ export type M1Runtime = Readonly<{
   admin: Pick<
     AdminService,
     'getUser' | 'listUsers' | 'revokeUserSessions' | 'setPlatformRole' | 'setUserStatus'
+  >;
+  administratorInvitations: Pick<
+    AdministratorInvitationService,
+    | 'acceptInvitation'
+    | 'createInvitation'
+    | 'listInvitations'
+    | 'resendInvitation'
+    | 'revokeInvitation'
   >;
   auth: Pick<
     AuthService,
@@ -367,6 +385,23 @@ export function createM1Router(runtime: M1Runtime): Router {
   );
 
   router.post(
+    '/auth/administrator-invitations/accept',
+    asyncRoute(async (request, response) => {
+      const payload = z
+        .object({ password: z.string().min(12), token: z.string().min(20) })
+        .parse(request.body);
+      response
+        .status(200)
+        .json(
+          await runtime.administratorInvitations.acceptInvitation(
+            { ...payload, ipAddress: sessionMetadata(request).ipAddress },
+            getResponseTraceId(response.locals),
+          ),
+        );
+    }),
+  );
+
+  router.post(
     '/auth/login',
     asyncRoute(async (request, response) => {
       const session = await runtime.auth.login({
@@ -574,6 +609,75 @@ export function createM1Router(runtime: M1Runtime): Router {
             AdminUserListQuerySchema.parse(request.query),
           ),
         );
+    }),
+  );
+
+  router.get(
+    '/admin/administrator-invitations',
+    asyncRoute(async (request, response) => {
+      response
+        .status(200)
+        .json(
+          await runtime.administratorInvitations.listInvitations(
+            await requireUser(request, runtime),
+            AdministratorInvitationListQuerySchema.parse(request.query),
+          ),
+        );
+    }),
+  );
+
+  router.post(
+    '/admin/administrator-invitations',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const idempotencyKey = z
+        .string()
+        .trim()
+        .min(8)
+        .max(128)
+        .parse(request.header('idempotency-key'));
+      const payload = AdministratorInvitationSchema.parse(request.body);
+      response
+        .status(201)
+        .json(
+          await runtime.administratorInvitations.createInvitation(
+            await requireUser(request, runtime),
+            { ...payload, idempotencyKey },
+            getResponseTraceId(response.locals),
+          ),
+        );
+    }),
+  );
+
+  router.post(
+    '/admin/administrator-invitations/:invitationId/resend',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const payload = z.object({ reason: ReasonSchema }).parse(request.body);
+      response.status(200).json({
+        invitation: await runtime.administratorInvitations.resendInvitation(
+          await requireUser(request, runtime),
+          z.uuid().parse(request.params.invitationId),
+          payload.reason,
+          getResponseTraceId(response.locals),
+        ),
+      });
+    }),
+  );
+
+  router.delete(
+    '/admin/administrator-invitations/:invitationId',
+    asyncRoute(async (request, response) => {
+      requireCsrf(request, runtime);
+      const payload = z.object({ reason: ReasonSchema }).parse(request.body);
+      response.status(200).json({
+        invitation: await runtime.administratorInvitations.revokeInvitation(
+          await requireUser(request, runtime),
+          z.uuid().parse(request.params.invitationId),
+          payload.reason,
+          getResponseTraceId(response.locals),
+        ),
+      });
     }),
   );
 

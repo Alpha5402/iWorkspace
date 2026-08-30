@@ -270,6 +270,39 @@ export function createOpenApiDocument(m1Enabled = false): OpenApiDocument {
           tags: ['platform-admin'],
         },
       },
+      '/api/v1/admin/administrator-invitations': {
+        get: {
+          operationId: 'listAdministratorInvitations',
+          responses: { 200: { description: 'Bounded administrator-invitation page' } },
+          tags: ['platform-admin'],
+        },
+        post: {
+          operationId: 'createAdministratorInvitation',
+          responses: { 201: { description: 'Administrator invitation created or deduplicated' } },
+          tags: ['platform-admin'],
+        },
+      },
+      '/api/v1/admin/administrator-invitations/{invitationId}': {
+        delete: {
+          operationId: 'revokeAdministratorInvitation',
+          responses: { 200: { description: 'Administrator invitation revoked' } },
+          tags: ['platform-admin'],
+        },
+      },
+      '/api/v1/admin/administrator-invitations/{invitationId}/resend': {
+        post: {
+          operationId: 'resendAdministratorInvitation',
+          responses: { 200: { description: 'Administrator invitation credential rotated' } },
+          tags: ['platform-admin'],
+        },
+      },
+      '/api/v1/auth/administrator-invitations/accept': {
+        post: {
+          operationId: 'acceptAdministratorInvitation',
+          responses: { 200: { description: 'Administrator account activated' } },
+          tags: ['identity'],
+        },
+      },
       '/api/v1/admin/users/{userId}': {
         get: {
           operationId: 'getPlatformUser',

@@ -14,6 +14,7 @@ import {
 } from '@delivery/security';
 
 import { AdminService } from '../application/adminService.js';
+import { AdministratorInvitationService } from '../application/administratorInvitationService.js';
 import { AuthService } from '../application/authService.js';
 import { ControlPlaneService } from '../application/controlPlaneService.js';
 import { PublicAuthRateLimiter } from '../application/publicAuthRateLimiter.js';
@@ -202,8 +203,16 @@ function createRuntime(database: DeliveryDatabase, tokenPepper: string): M1Runti
   const accessKey = createSigningKey('benchmark-access');
   const refreshKey = createSigningKey('benchmark-refresh');
   const rateLimiter = new PublicAuthRateLimiter(database, tokenPepper);
+  const emailOutboxKey = { key: randomBytes(32), version: 1 };
   return {
     admin: new AdminService(database),
+    administratorInvitations: new AdministratorInvitationService(
+      database,
+      database,
+      tokenPepper,
+      emailOutboxKey,
+      rateLimiter,
+    ),
     artifactStore: {
       get: () => Promise.reject(new Error('BENCHMARK_ARTIFACT_READ_NOT_AVAILABLE')),
     },
@@ -230,12 +239,7 @@ function createRuntime(database: DeliveryDatabase, tokenPepper: string): M1Runti
     },
     githubAppSlug: 'benchmark',
     githubWebhookSecret: randomBytes(32).toString('hex'),
-    registration: new RegistrationService(
-      database,
-      tokenPepper,
-      { key: randomBytes(32), version: 1 },
-      rateLimiter,
-    ),
+    registration: new RegistrationService(database, tokenPepper, emailOutboxKey, rateLimiter),
     secureCookies: false,
     webOrigin: 'http://127.0.0.1',
   };

@@ -143,26 +143,45 @@ describe('API client', () => {
 
   it('maps public identity, session, organization, and platform-administration endpoints', async () => {
     document.cookie = 'iw_csrf=csrf-value';
-    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation((input) => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url =
         typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-      const body = url.includes('/verify-email')
-        ? { organizationId: 'organization' }
-        : url.endsWith('/me/organizations')
-          ? { organizations: [{ id: 'organization' }] }
-          : url.endsWith('/auth/sessions')
-            ? { sessions: [{ sessionId: 'session' }] }
-            : url.includes('/admin/users/user') && !url.includes('revoke-sessions')
-              ? { user: { id: 'user' } }
-              : url.includes('/admin/users')
-                ? { users: [{ id: 'user' }] }
-                : url.includes('/auth/logout') ||
-                    url.includes('/auth/change-password') ||
-                    url.includes('/revoke-sessions')
-                  ? { revokedFamilies: 1 }
-                  : url.includes('/auth/sessions/')
-                    ? { currentSessionRevoked: false }
-                    : { accepted: true };
+      const body = url.includes('/auth/administrator-invitations/accept')
+        ? { organizationId: 'organization', userId: 'administrator' }
+        : url.includes('/verify-email')
+          ? { organizationId: 'organization' }
+          : url.endsWith('/me')
+            ? {
+                actor: {
+                  organizationId: 'organization',
+                  sessionId: 'session',
+                  type: 'USER_SESSION',
+                  userId: 'user',
+                },
+              }
+            : url.endsWith('/me/organizations')
+              ? { organizations: [{ id: 'organization' }] }
+              : url.endsWith('/auth/sessions')
+                ? { sessions: [{ sessionId: 'session' }] }
+                : url.includes('/admin/administrator-invitations')
+                  ? init?.method === 'POST' && url.endsWith('/administrator-invitations')
+                    ? { duplicate: false, invitation: { id: 'invitation', status: 'PENDING' } }
+                    : url.endsWith('/resend')
+                      ? { invitation: { id: 'invitation', status: 'PENDING' } }
+                      : init?.method === 'DELETE'
+                        ? { invitation: { id: 'invitation', status: 'REVOKED' } }
+                        : { invitations: [{ id: 'invitation', status: 'PENDING' }] }
+                  : url.includes('/admin/users/user') && !url.includes('revoke-sessions')
+                    ? { user: { id: 'user' } }
+                    : url.includes('/admin/users')
+                      ? { users: [{ id: 'user' }] }
+                      : url.includes('/auth/logout') ||
+                          url.includes('/auth/change-password') ||
+                          url.includes('/revoke-sessions')
+                        ? { revokedFamilies: 1 }
+                        : url.includes('/auth/sessions/')
+                          ? { currentSessionRevoked: false }
+                          : { accepted: true };
       return Promise.resolve(
         new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }),
       );
@@ -170,6 +189,10 @@ describe('API client', () => {
     const client = createApiClient(fetchImplementation, '/api/v1');
 
     await client.register('user@example.com', 'another secure password');
+    await client.acceptAdministratorInvitation(
+      'administrator-invitation-token',
+      'another secure password',
+    );
     await client.resendVerification('user@example.com');
     await expect(client.verifyEmail('verification-token')).resolves.toEqual({
       organizationId: 'organization',
@@ -181,6 +204,13 @@ describe('API client', () => {
     await client.logoutOtherSessions();
     await client.logoutAllSessions();
     await client.changePassword('current secure password', 'different secure password');
+    await expect(client.getCurrentActor()).resolves.toMatchObject({ userId: 'user' });
+    await expect(client.listAdministratorInvitations({ status: 'PENDING' })).resolves.toMatchObject(
+      { invitations: [{ id: 'invitation' }] },
+    );
+    await client.createAdministratorInvitation('admin@example.com', 'Add operator');
+    await client.resendAdministratorInvitation('invitation', 'Email was lost');
+    await client.revokeAdministratorInvitation('invitation', 'Access withdrawn');
     await expect(
       client.listPlatformUsers({ limit: 25, platformRole: 'USER', status: 'ACTIVE' }),
     ).resolves.toMatchObject({ users: [{ id: 'user' }] });

@@ -1,15 +1,16 @@
 import { z } from 'zod';
 
-export type VerificationEmail = Readonly<{
+export type IdentityEmail = Readonly<{
+  actionUrl: string;
   deliveryId: string;
   recipientEmail: string;
-  verificationUrl: string;
+  template: 'administrator-invitation' | 'verify-email';
 }>;
 
 export type EmailDeliveryResult = Readonly<{ providerMessageId: string }>;
 
 export interface EmailProvider {
-  sendVerificationEmail(message: VerificationEmail): Promise<EmailDeliveryResult>;
+  sendIdentityEmail(message: IdentityEmail): Promise<EmailDeliveryResult>;
 }
 
 export class EmailProviderError extends Error {
@@ -32,14 +33,17 @@ export class HttpEmailProvider implements EmailProvider {
     private readonly request: typeof fetch = fetch,
   ) {}
 
-  public async sendVerificationEmail(message: VerificationEmail): Promise<EmailDeliveryResult> {
+  public async sendIdentityEmail(message: IdentityEmail): Promise<EmailDeliveryResult> {
     let response: Response;
     try {
       response = await this.request(this.endpoint, {
         body: JSON.stringify({
-          template: 'verify-email',
+          template: message.template,
           to: message.recipientEmail,
-          variables: { verificationUrl: message.verificationUrl },
+          variables:
+            message.template === 'verify-email'
+              ? { verificationUrl: message.actionUrl }
+              : { invitationUrl: message.actionUrl },
         }),
         headers: {
           authorization: `Bearer ${this.apiKey}`,

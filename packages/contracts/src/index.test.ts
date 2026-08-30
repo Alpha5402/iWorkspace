@@ -44,6 +44,14 @@ describe('contracts', () => {
     );
   });
 
+  it('publishes administrator invitation lifecycle endpoints', () => {
+    const paths = createOpenApiDocument(true).paths;
+
+    expect(paths).toHaveProperty('/api/v1/admin/administrator-invitations');
+    expect(paths).toHaveProperty('/api/v1/admin/administrator-invitations/{invitationId}/resend');
+    expect(paths).toHaveProperty('/api/v1/auth/administrator-invitations/accept');
+  });
+
   it('rejects malformed error and health responses', () => {
     expect(() => ErrorResponseSchema.parse({ error: { code: '', traceId: '' } })).toThrow();
     expect(() => HealthResponseSchema.parse({ service: '', status: 'unknown' })).toThrow();

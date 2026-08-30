@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type Router } from 'vue-router';
 
 import CapabilityView from './views/CapabilityView.vue';
 import AccountView from './views/AccountView.vue';
+import AdministratorInvitationAcceptView from './views/AdministratorInvitationAcceptView.vue';
 import AdminUsersView from './views/AdminUsersView.vue';
 import HomeView from './views/HomeView.vue';
 import InvitationAcceptView from './views/InvitationAcceptView.vue';
@@ -47,6 +48,11 @@ export const router = createRouter({
     { component: VerifyEmailView, name: 'verify-email', path: '/verify-email' },
     { component: AccountView, name: 'account', path: '/account' },
     { component: AdminUsersView, name: 'admin-users', path: '/admin/users' },
+    {
+      component: AdministratorInvitationAcceptView,
+      name: 'administrator-invitation-accept',
+      path: '/administrator-invitations/accept',
+    },
     { component: InvitationAcceptView, name: 'invitation-accept', path: '/invitations/accept' },
     { component: ProjectsView, name: 'projects', path: '/projects' },
     { component: ProjectView, name: 'project', path: '/projects/:projectId' },

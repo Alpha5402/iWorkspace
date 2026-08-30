@@ -98,6 +98,15 @@ export async function acquirePlatformAdminMutationLock(
   );
 }
 
+export async function acquireIdentityEmailLock(
+  transaction: DeliveryTransaction,
+  canonicalEmail: string,
+): Promise<void> {
+  await sql`select pg_advisory_xact_lock(hashtextextended(${`iworkspace:identity:${canonicalEmail}`}, 0))`.execute(
+    transaction,
+  );
+}
+
 export type OutboxEventInput = Readonly<{
   availableAt?: Date;
   causationId?: string;

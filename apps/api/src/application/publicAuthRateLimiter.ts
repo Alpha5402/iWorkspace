@@ -14,10 +14,11 @@ export class PublicAuthRateLimiter {
 
   public async consume(
     input: Readonly<{
-      email: string;
+      identity: string;
+      identityDimension: 'EMAIL' | 'TOKEN';
       ipAddress: string;
       maximumHits: number;
-      operation: 'LOGIN' | 'REGISTER' | 'RESEND_VERIFICATION';
+      operation: 'ACCEPT_ADMINISTRATOR_INVITATION' | 'LOGIN' | 'REGISTER' | 'RESEND_VERIFICATION';
     }>,
   ): Promise<void> {
     await this.database.transaction().execute(async (transaction) => {
@@ -32,7 +33,10 @@ export class PublicAuthRateLimiter {
         .where('expires_at', '<', databaseNow)
         .execute();
       for (const [dimension, value] of [
-        [`${input.operation}:EMAIL`, input.email.trim().toLocaleLowerCase()],
+        [
+          `${input.operation}:${input.identityDimension}`,
+          input.identity.trim().toLocaleLowerCase(),
+        ],
         [`${input.operation}:IP`, input.ipAddress],
       ] as const) {
         const keyHash = createHmac('sha256', this.tokenPepper).update(value).digest('hex');

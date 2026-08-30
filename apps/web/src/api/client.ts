@@ -76,8 +76,26 @@ export type PlatformUserDetail = PlatformUserSummary &
       tokenPrefix: string;
     }>[];
   }>;
+export type AdministratorInvitationSummary = Readonly<{
+  acceptedAt?: string;
+  acceptedUserId?: string;
+  createdAt: string;
+  createdBy: string;
+  delivery: Readonly<{
+    errorCode?: string;
+    sentAt?: string;
+    status: 'PENDING' | 'CLAIMED' | 'RETRY_WAIT' | 'SENT' | 'FAILED';
+  }>;
+  email: string;
+  expiresAt: string;
+  id: string;
+  revokedAt?: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED';
+  targetRole: 'ADMIN';
+}>;
 
 export type ApiClient = Readonly<{
+  acceptAdministratorInvitation(token: string, password: string): Promise<void>;
   register(email: string, password: string): Promise<void>;
   resendVerification(email: string): Promise<void>;
   verifyEmail(token: string): Promise<Readonly<{ organizationId: string }>>;
@@ -122,6 +140,13 @@ export type ApiClient = Readonly<{
     currentPassword: string,
     newPassword: string,
   ): Promise<Readonly<{ revokedFamilies: number }>>;
+  createAdministratorInvitation(
+    email: string,
+    reason: string,
+  ): Promise<Readonly<{ duplicate: boolean; invitation: AdministratorInvitationSummary }>>;
+  getCurrentActor(): Promise<
+    Readonly<{ organizationId: string; sessionId: string; type: 'USER_SESSION'; userId: string }>
+  >;
   listPlatformUsers(
     input?: Readonly<{
       cursor?: string;
@@ -132,6 +157,18 @@ export type ApiClient = Readonly<{
     }>,
   ): Promise<Readonly<{ nextCursor?: string; users: readonly PlatformUserSummary[] }>>;
   getPlatformUser(userId: string): Promise<PlatformUserDetail>;
+  listAdministratorInvitations(
+    input?: Readonly<{
+      cursor?: string;
+      limit?: number;
+      status?: AdministratorInvitationSummary['status'];
+    }>,
+  ): Promise<
+    Readonly<{
+      invitations: readonly AdministratorInvitationSummary[];
+      nextCursor?: string;
+    }>
+  >;
   setPlatformUserStatus(
     userId: string,
     status: 'ACTIVE' | 'SUSPENDED',
@@ -146,6 +183,14 @@ export type ApiClient = Readonly<{
     userId: string,
     reason: string,
   ): Promise<Readonly<{ revokedFamilies: number }>>;
+  resendAdministratorInvitation(
+    invitationId: string,
+    reason: string,
+  ): Promise<AdministratorInvitationSummary>;
+  revokeAdministratorInvitation(
+    invitationId: string,
+    reason: string,
+  ): Promise<AdministratorInvitationSummary>;
   login(email: string, password: string): Promise<void>;
   logout(): Promise<void>;
   publishRuleset(projectId: string, versionId: string): Promise<void>;
@@ -198,6 +243,12 @@ export function createApiClient(
   };
 
   return {
+    async acceptAdministratorInvitation(token, password) {
+      await request('/auth/administrator-invitations/accept', {
+        body: JSON.stringify({ password, token }),
+        method: 'POST',
+      });
+    },
     async register(email, password) {
       await request('/auth/register', {
         body: JSON.stringify({ email, password }),
@@ -360,6 +411,25 @@ export function createApiClient(
         method: 'POST',
       });
     },
+    async createAdministratorInvitation(email, reason) {
+      return request('/admin/administrator-invitations', {
+        body: JSON.stringify({ email, reason }),
+        headers: { 'idempotency-key': crypto.randomUUID() },
+        method: 'POST',
+      });
+    },
+    async getCurrentActor() {
+      return (
+        await request<{
+          actor: {
+            organizationId: string;
+            sessionId: string;
+            type: 'USER_SESSION';
+            userId: string;
+          };
+        }>('/me')
+      ).actor;
+    },
     async listPlatformUsers(input = {}) {
       const query = new URLSearchParams();
       if (input.cursor !== undefined) query.set('cursor', input.cursor);
@@ -372,6 +442,14 @@ export function createApiClient(
     },
     async getPlatformUser(userId) {
       return (await request<{ user: PlatformUserDetail }>(`/admin/users/${userId}`)).user;
+    },
+    async listAdministratorInvitations(input = {}) {
+      const query = new URLSearchParams();
+      if (input.cursor !== undefined) query.set('cursor', input.cursor);
+      if (input.limit !== undefined) query.set('limit', String(input.limit));
+      if (input.status !== undefined) query.set('status', input.status);
+      const suffix = query.size === 0 ? '' : `?${query.toString()}`;
+      return request(`/admin/administrator-invitations${suffix}`);
     },
     async setPlatformUserStatus(userId, status, reason) {
       return (
@@ -394,6 +472,22 @@ export function createApiClient(
         body: JSON.stringify({ reason }),
         method: 'POST',
       });
+    },
+    async resendAdministratorInvitation(invitationId, reason) {
+      return (
+        await request<{ invitation: AdministratorInvitationSummary }>(
+          `/admin/administrator-invitations/${invitationId}/resend`,
+          { body: JSON.stringify({ reason }), method: 'POST' },
+        )
+      ).invitation;
+    },
+    async revokeAdministratorInvitation(invitationId, reason) {
+      return (
+        await request<{ invitation: AdministratorInvitationSummary }>(
+          `/admin/administrator-invitations/${invitationId}`,
+          { body: JSON.stringify({ reason }), method: 'DELETE' },
+        )
+      ).invitation;
     },
     async login(email, password) {
       await request('/auth/login', { body: JSON.stringify({ email, password }), method: 'POST' });

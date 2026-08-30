@@ -63,8 +63,8 @@ export class EmailDeliveryWorker {
 
   private async deliver(delivery: ClaimedIdentityEmail): Promise<void> {
     try {
-      if (!delivery.verificationTokenActive) {
-        throw new EmailProviderError('VERIFICATION_TOKEN_INACTIVE', false);
+      if (!delivery.credentialActive) {
+        throw new EmailProviderError('IDENTITY_EMAIL_CREDENTIAL_INACTIVE', false);
       }
       const keyEncryptionKey = this.keyEncryptionKeys.get(delivery.keyVersion);
       if (keyEncryptionKey === undefined) {
@@ -83,12 +83,19 @@ export class EmailDeliveryWorker {
         },
         keyEncryptionKey,
       );
-      const verificationUrl = new URL('/verify-email', this.verificationBaseUrl);
-      verificationUrl.searchParams.set('token', token);
-      const result = await this.provider.sendVerificationEmail({
+      const actionUrl = new URL(
+        delivery.messageType === 'VERIFY_EMAIL'
+          ? '/verify-email'
+          : '/administrator-invitations/accept',
+        this.verificationBaseUrl,
+      );
+      actionUrl.searchParams.set('token', token);
+      const result = await this.provider.sendIdentityEmail({
+        actionUrl: actionUrl.toString(),
         deliveryId: delivery.id,
         recipientEmail: delivery.recipientEmail,
-        verificationUrl: verificationUrl.toString(),
+        template:
+          delivery.messageType === 'VERIFY_EMAIL' ? 'verify-email' : 'administrator-invitation',
       });
       if (
         !(await completeIdentityEmailDelivery(
@@ -100,7 +107,10 @@ export class EmailDeliveryWorker {
       ) {
         throw new Error('EMAIL_DELIVERY_FENCING_REJECTED');
       }
-      this.logger.info({ deliveryId: delivery.id }, 'identity verification email delivered');
+      this.logger.info(
+        { deliveryId: delivery.id, messageType: delivery.messageType },
+        'identity email delivered',
+      );
     } catch (error) {
       const providerError =
         error instanceof EmailProviderError
@@ -121,7 +131,7 @@ export class EmailDeliveryWorker {
       });
       this.logger.error(
         { deliveryId: delivery.id, errorCode: providerError.code, result },
-        'identity verification email delivery failed',
+        'identity email delivery failed',
       );
     }
   }

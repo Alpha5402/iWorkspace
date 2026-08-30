@@ -51,7 +51,8 @@ export class AuthService {
     }>,
   ): Promise<SessionBundle> {
     await this.rateLimiter.consume({
-      email: input.email,
+      identity: input.email,
+      identityDimension: 'EMAIL',
       ipAddress: input.ipAddress,
       maximumHits: 10,
       operation: 'LOGIN',

@@ -12,6 +12,7 @@ import { GitHubAppProvider } from '@delivery/providers-github';
 
 import { AuthService } from './application/authService.js';
 import { AdminService } from './application/adminService.js';
+import { AdministratorInvitationService } from './application/administratorInvitationService.js';
 import { ControlPlaneService } from './application/controlPlaneService.js';
 import { PublicAuthRateLimiter } from './application/publicAuthRateLimiter.js';
 import { RegistrationService } from './application/registrationService.js';
@@ -44,6 +45,13 @@ const m1Runtime =
     ? undefined
     : {
         admin: new AdminService(platformAdminDatabase),
+        administratorInvitations: new AdministratorInvitationService(
+          database,
+          platformAdminDatabase,
+          config.m1.tokenPepper,
+          config.m1.emailOutboxKey,
+          publicAuthRateLimiter,
+        ),
         auth: new AuthService(
           database,
           new AccessTokenService(config.m1.authAccessKeys, 'iworkspace', 'iworkspace-access'),

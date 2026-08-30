@@ -51,6 +51,16 @@ function createRuntime(): M1Runtime {
       setPlatformRole: vi.fn().mockResolvedValue({ id: userId, platformRole: 'ADMIN' }),
       setUserStatus: vi.fn().mockResolvedValue({ id: userId, status: 'SUSPENDED' }),
     },
+    administratorInvitations: {
+      acceptInvitation: vi.fn().mockResolvedValue({ organizationId, userId }),
+      createInvitation: vi.fn().mockResolvedValue({
+        duplicate: false,
+        invitation: { id: randomUUID(), status: 'PENDING' },
+      }),
+      listInvitations: vi.fn().mockResolvedValue({ invitations: [] }),
+      resendInvitation: vi.fn().mockResolvedValue({ id: randomUUID(), status: 'PENDING' }),
+      revokeInvitation: vi.fn().mockResolvedValue({ id: randomUUID(), status: 'REVOKED' }),
+    },
     artifactStore: { get: vi.fn().mockResolvedValue(content) },
     auth: {
       acceptInvitation: vi.fn().mockResolvedValue({ organizationId }),
@@ -222,6 +232,11 @@ describe('M1 HTTP router', () => {
     const registrationInput = vi.mocked(runtime.registration.register).mock.calls.at(0)?.at(0);
     expect(registrationInput).toMatchObject({ email: 'new@example.com' });
     expect(registrationInput?.ipAddress).toBeTypeOf('string');
+    await expect(
+      request(app)
+        .post('/api/v1/auth/administrator-invitations/accept')
+        .send({ password: 'another secure password', token: `iwadmin_${'x'.repeat(32)}` }),
+    ).resolves.toMatchObject({ status: 200, body: { organizationId, userId } });
   });
 
   it('routes organization switching, session controls, and bounded platform administration', async () => {
@@ -259,6 +274,27 @@ describe('M1 HTTP router', () => {
       authenticated(
         request(app).get('/api/v1/admin/users').query({ limit: 25, platformRole: 'USER' }),
       ),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      authenticated(request(app).get('/api/v1/admin/administrator-invitations')),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      mutating(request(app).post('/api/v1/admin/administrator-invitations'))
+        .set('idempotency-key', 'administrator-invitation-request')
+        .send({ email: 'new-admin@example.com', reason: 'Add platform operator' }),
+    ).resolves.toMatchObject({ status: 201 });
+    const administratorInvitationId = randomUUID();
+    await expect(
+      mutating(
+        request(app).post(
+          `/api/v1/admin/administrator-invitations/${administratorInvitationId}/resend`,
+        ),
+      ).send({ reason: 'Original email was lost' }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      mutating(
+        request(app).delete(`/api/v1/admin/administrator-invitations/${administratorInvitationId}`),
+      ).send({ reason: 'Access no longer required' }),
     ).resolves.toMatchObject({ status: 200 });
     await expect(
       authenticated(request(app).get(`/api/v1/admin/users/${userId}`)),

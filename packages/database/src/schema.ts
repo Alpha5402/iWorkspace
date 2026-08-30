@@ -35,7 +35,26 @@ export interface EmailVerificationTokensTable {
   user_id: string;
 }
 
+export interface AdministratorInvitationsTable {
+  accepted_user_id: string | null;
+  consumed_at: Timestamp | null;
+  created_at: Timestamp;
+  created_by: string;
+  email: string;
+  email_canonical: Generated<string>;
+  expires_at: Timestamp;
+  id: GeneratedId;
+  idempotency_key: string;
+  request_hash: string;
+  revoked_at: Timestamp | null;
+  status: Generated<'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED'>;
+  target_role: Generated<'ADMIN'>;
+  token_hash: string;
+  updated_at: Timestamp;
+}
+
 export interface IdentityEmailOutboxTable {
+  administrator_invitation_id: string | null;
   aad: string;
   attempt_count: Generated<number>;
   available_at: Timestamp;
@@ -49,13 +68,13 @@ export interface IdentityEmailOutboxTable {
   key_version: number;
   last_error_code: string | null;
   max_attempts: Generated<number>;
-  message_type: 'VERIFY_EMAIL';
+  message_type: 'ADMINISTRATOR_INVITATION' | 'VERIFY_EMAIL';
   provider_message_id: string | null;
   recipient_email: string;
   sent_at: Timestamp | null;
   status: Generated<'PENDING' | 'CLAIMED' | 'RETRY_WAIT' | 'SENT' | 'FAILED'>;
   tag: string;
-  verification_token_id: string;
+  verification_token_id: string | null;
   wrap_iv: string;
   wrap_tag: string;
 }
@@ -479,6 +498,7 @@ export interface ProviderCapacityLeasesTable {
 }
 
 export interface DatabaseSchema {
+  administrator_invitations: AdministratorInvitationsTable;
   artifact_links: ArtifactLinksTable;
   artifacts: ArtifactsTable;
   audit_events: AuditEventsTable;
