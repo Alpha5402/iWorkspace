@@ -1,17 +1,19 @@
 # AI Delivery Control Plane
 
-这是一个以后端系统设计为核心的 AI 软件交付控制面。当前里程碑为 **M0：架构与工程骨架**，业务能力尚未实现。
+这是一个以后端系统设计为核心的 AI 软件交付控制面。M0 已完成，当前正在完成 **M1：身份安全、分布式作业内核与 Review Harness** 的真实环境验收；M2 设计协作和 M3 交付闭环尚未开始。
 
 ## 当前状态
 
-- Vue 3 Web 框架；
-- ExpressJS Control Plane API；
-- Worker 健康与依赖探测进程；
-- Sandbox Runner 健康与 Docker 探测进程；
+- Vue 3 最小管理台，覆盖公开注册、邮箱验证、登录、组织/设备、平台用户管理、项目与 Review；
+- ExpressJS 模块化单体 Control Plane API，使用 PostgreSQL RLS、显式 Migration 和稳定 Schema；
+- JWT Access/Refresh 双 Token、旋转会话、项目 Token、Secret 信封加密、平台/租户分层 RBAC 与审计；
+- 独立 Worker，使用 Transactional Outbox、RabbitMQ、Consumer Inbox、Lease、Heartbeat 和 Fencing Token 执行可恢复 Review DAG；
+- 不可变 Ruleset、冻结 GitHub Diff、确定性规则、模型 Provider Port、Verify 门禁、MinIO Artifact 血缘和 GitHub External Effect Ledger；
+- Sandbox Runner 仍只有 M0 安全边界和 Docker 探测，M1 不执行目标仓库代码；
 - PostgreSQL、RabbitMQ、MinIO、OpenTelemetry Collector、Jaeger 本地基础设施；
-- Identity、Project、Artifact、Workflow、Review、Design、Delivery、Integration、Audit 只提供 `501 FEATURE_NOT_IMPLEMENTED` 边界。
+- Design 与 Delivery 能力继续明确返回 `501 FEATURE_NOT_IMPLEMENTED`，不会伪装为已完成。
 
-M1 的用户、Token、Secret、数据库业务表和 Review Harness 尚未开始。
+M1 的 L2 自动化门禁以及本地多进程/基础设施故障演练已通过。真实 GitHub App、DeepSeek、浏览器完整身份路径和本仓库 Dogfooding 仍是未完成的 L3 边界，详见 [TODO.md](./TODO.md)。
 
 ## 环境要求
 
@@ -56,17 +58,19 @@ pnpm infra:down
 ## 质量门禁
 
 ```bash
-pnpm format:check
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm test:integration
-pnpm check:architecture
-pnpm check:dead-code
-pnpm check:duplication
-pnpm build
+pnpm quality
 ```
 
 `pnpm test:integration` 只有在 `.env` 中设置 `RUN_INFRA_INTEGRATION=true` 且基础设施已启动时才运行真实依赖探测；CI 未启动基础设施时会明确跳过该组测试。
+
+## M1 故障演练
+
+确保没有其他 Review Worker 消费本地队列后运行：
+
+```bash
+pnpm drill:worker-reliability
+```
+
+Harness 默认连续执行两轮。每轮创建并迁移受保护命名的临时数据库，对测试 Worker 执行 `SIGKILL`，验证 Lease/Fencing 接管，重启本项目 RabbitMQ 容器，制造并安全重放真实 DLQ 消息，最后核对唯一外部副作用、固定 Artifact 和空队列并删除临时数据。脱敏结果写入被 Git 忽略的 `.workspace/proofs/`；检测到其他消费者、遗留消息或非本项目 RabbitMQ 容器名时会拒绝运行。
 
 完整规划见 [TODO.md](./TODO.md)，工程原则见 [AGENTS.md](./AGENTS.md)。

@@ -20,6 +20,7 @@
     "dev:sandbox": "pnpm --filter @delivery/sandbox-runner dev",
     "dev:web": "pnpm --filter @delivery/web dev",
     "dev:worker": "pnpm --filter @delivery/worker dev",
+    "drill:worker-reliability": "RELIABILITY_RABBIT_CONTAINER=delivery-control-plane-rabbitmq-1 pnpm --filter @delivery/worker drill:reliability",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "infra:down": "docker compose --env-file .env -f infra/compose/docker-compose.yml down",
