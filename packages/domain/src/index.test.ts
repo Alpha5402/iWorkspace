@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,7 +9,13 @@ import {
   createFindingFingerprint,
   determineCheckConclusion,
   DomainError,
+  externalEffectStatuses,
+  type ExternalEffectStatus,
+  runStatuses,
+  type RunStatus,
   selectCheckAnnotations,
+  taskStatuses,
+  type TaskStatus,
   type ReviewFinding,
 } from './index.js';
 
@@ -23,42 +31,74 @@ describe('DomainError', () => {
 });
 
 describe('run state machine', () => {
-  it('allows a valid transition and rejects a terminal transition', () => {
-    expect(() => {
-      assertRunTransition('ACCEPTED', 'QUEUED');
-    }).not.toThrow();
-    expect(() => {
-      assertRunTransition('SUCCEEDED', 'RUNNING');
-    }).toThrow(expect.objectContaining({ code: 'INVALID_STATE_TRANSITION' }));
+  const runTransitions: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
+    ACCEPTED: ['QUEUED', 'CANCELLED'],
+    QUEUED: ['RUNNING', 'CANCELLED', 'STALE'],
+    RUNNING: ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED', 'STALE'],
+    SUCCEEDED: [],
+    PARTIAL: [],
+    FAILED: [],
+    CANCELLED: [],
+    STALE: [],
+  };
+  const taskTransitions: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
+    PENDING: ['LEASED', 'CANCELLED'],
+    LEASED: ['SUCCEEDED', 'RETRY_WAIT', 'FAILED', 'CANCELLED'],
+    RETRY_WAIT: ['LEASED', 'FAILED', 'CANCELLED'],
+    SUCCEEDED: [],
+    FAILED: [],
+    CANCELLED: [],
+  };
+  const externalEffectTransitions: Readonly<
+    Record<ExternalEffectStatus, readonly ExternalEffectStatus[]>
+  > = {
+    PREPARED: ['IN_FLIGHT', 'FAILED'],
+    IN_FLIGHT: ['SUCCEEDED', 'FAILED', 'UNKNOWN'],
+    UNKNOWN: ['IN_FLIGHT', 'SUCCEEDED', 'FAILED'],
+    SUCCEEDED: [],
+    FAILED: ['IN_FLIGHT'],
+  };
+
+  it('enforces the complete run transition matrix', () => {
+    assertTransitionMatrix(runStatuses, runTransitions, assertRunTransition, 'run');
   });
 
-  it('covers every allowed task and external-effect recovery transition', () => {
-    expect(() => {
-      assertTaskTransition('PENDING', 'LEASED');
-    }).not.toThrow();
-    expect(() => {
-      assertTaskTransition('LEASED', 'RETRY_WAIT');
-    }).not.toThrow();
-    expect(() => {
-      assertTaskTransition('RETRY_WAIT', 'LEASED');
-    }).not.toThrow();
-    expect(() => {
-      assertTaskTransition('FAILED', 'LEASED');
-    }).toThrow(expect.objectContaining({ code: 'INVALID_STATE_TRANSITION' }));
-    expect(() => {
-      assertExternalEffectTransition('PREPARED', 'IN_FLIGHT');
-    }).not.toThrow();
-    expect(() => {
-      assertExternalEffectTransition('IN_FLIGHT', 'UNKNOWN');
-    }).not.toThrow();
-    expect(() => {
-      assertExternalEffectTransition('UNKNOWN', 'SUCCEEDED');
-    }).not.toThrow();
-    expect(() => {
-      assertExternalEffectTransition('SUCCEEDED', 'IN_FLIGHT');
-    }).toThrow(expect.objectContaining({ code: 'INVALID_STATE_TRANSITION' }));
+  it('enforces the complete task and external-effect transition matrices', () => {
+    assertTransitionMatrix(taskStatuses, taskTransitions, assertTaskTransition, 'task');
+    assertTransitionMatrix(
+      externalEffectStatuses,
+      externalEffectTransitions,
+      assertExternalEffectTransition,
+      'external effect',
+    );
   });
 });
+
+function assertTransitionMatrix<TStatus extends string>(
+  statuses: readonly TStatus[],
+  allowedTransitions: Readonly<Record<TStatus, readonly TStatus[]>>,
+  assertTransition: (current: TStatus, next: TStatus) => void,
+  subject: string,
+): void {
+  for (const current of statuses) {
+    for (const next of statuses) {
+      if (allowedTransitions[current].includes(next)) {
+        expect(() => {
+          assertTransition(current, next);
+        }, `${subject}: ${current} -> ${next}`).not.toThrow();
+      } else {
+        expect(() => {
+          assertTransition(current, next);
+        }, `${subject}: ${current} -> ${next}`).toThrow(
+          expect.objectContaining({
+            code: 'INVALID_STATE_TRANSITION',
+            message: `${subject} cannot transition from ${current} to ${next}`,
+          }),
+        );
+      }
+    }
+  }
+}
 
 describe('review quality gate', () => {
   const finding = (overrides: Partial<ReviewFinding> = {}): ReviewFinding => ({
@@ -120,6 +160,13 @@ describe('review quality gate', () => {
     expect(
       determineCheckConclusion({ coverageComplete: false, findings: [], runStatus: 'PARTIAL' }),
     ).toBe('neutral');
+    expect(
+      determineCheckConclusion({
+        coverageComplete: true,
+        findings: [finding({ severity: 'MAJOR', verificationStatus: 'NEEDS_HUMAN' })],
+        runStatus: 'SUCCEEDED',
+      }),
+    ).toBe('success');
   });
 
   it('publishes only confirmed and locatable annotations in stable order', () => {
@@ -137,11 +184,17 @@ describe('review quality gate', () => {
         finding({ confidence: 0.5, fingerprint: 'z-major', severity: 'MAJOR' }),
         finding({ confidence: 0.9, fingerprint: 'a-major', severity: 'MAJOR' }),
         finding({ endLine: 1, fingerprint: 'invalid', startLine: 2 }),
+        finding({ endLine: 0, fingerprint: 'zero-line', startLine: 0 }),
+        finding({ endLine: 3, fingerprint: 'single-line', startLine: 3 }),
         finding({ fingerprint: 'info', severity: 'INFO' }),
       ],
-      2,
+      3,
     );
-    expect(selected.map((candidate) => candidate.fingerprint)).toEqual(['a-major', 'z-major']);
+    expect(selected.map((candidate) => candidate.fingerprint)).toEqual([
+      'single-line',
+      'a-major',
+      'z-major',
+    ]);
   });
 
   it('normalizes finding fingerprints', () => {
@@ -158,5 +211,25 @@ describe('review quality gate', () => {
       ruleId: 'r1',
     });
     expect(first).toBe(second);
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).toBe(
+      createHash('sha256').update('r1\0src/a.ts\0line-hash\0unsafe write').digest('hex'),
+    );
+    expect(
+      createFindingFingerprint({
+        codeIdentity: 'line-hash',
+        message: 'unsafewrite',
+        path: 'src/a.ts',
+        ruleId: 'r1',
+      }),
+    ).not.toBe(first);
+    for (const changed of [
+      { codeIdentity: 'other-line', message: 'unsafe write', path: 'src/a.ts', ruleId: 'r1' },
+      { codeIdentity: 'line-hash', message: 'different', path: 'src/a.ts', ruleId: 'r1' },
+      { codeIdentity: 'line-hash', message: 'unsafe write', path: 'src/b.ts', ruleId: 'r1' },
+      { codeIdentity: 'line-hash', message: 'unsafe write', path: 'src/a.ts', ruleId: 'r2' },
+    ]) {
+      expect(createFindingFingerprint(changed)).not.toBe(first);
+    }
   });
 });

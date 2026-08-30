@@ -1,6 +1,6 @@
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 
-import { importPKCS8, SignJWT } from 'jose';
+import { decodeJwt, decodeProtectedHeader, importPKCS8, SignJWT } from 'jose';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,8 +10,11 @@ import {
   hashPassword,
   hasPermission,
   issueOpaqueToken,
+  organizationRoles,
+  type Permission,
   principalAuditMetadata,
   principalId,
+  projectRoles,
   RefreshTokenService,
   validateCsrf,
   verifyOpaqueToken,
@@ -23,10 +26,13 @@ describe('password credentials', () => {
     const password = 'correct horse battery staple';
     const passwordHash = await hashPassword(password);
     expect(passwordHash).toContain('$argon2id$');
+    expect(passwordHash).toContain('m=65536,t=3,p=1');
     await expect(verifyPassword(passwordHash, password)).resolves.toBe(true);
     await expect(verifyPassword(passwordHash, 'incorrect password')).resolves.toBe(false);
     await expect(verifyPassword('not-an-argon-hash', password)).resolves.toBe(false);
     await expect(hashPassword('too short')).rejects.toThrow('PASSWORD_TOO_SHORT');
+    await expect(hashPassword('12345678901')).rejects.toThrow('PASSWORD_TOO_SHORT');
+    await expect(hashPassword('123456789012')).resolves.toContain('$argon2id$');
   });
 });
 
@@ -34,9 +40,13 @@ describe('opaque tokens', () => {
   it('shows the secret once while keeping only a verifiable hash', () => {
     const token = issueOpaqueToken('iwpat', 'pepper');
     expect(token.token).toMatch(/^iwpat_/);
+    expect(token.prefix).toBe(token.token.slice(0, 12));
+    expect(token.prefix).toHaveLength(12);
+    expect(token.hash).toMatch(/^[a-f0-9]{64}$/);
     expect(token.hash).not.toContain(token.token);
     expect(verifyOpaqueToken(token.token, token.hash, 'pepper')).toBe(true);
     expect(verifyOpaqueToken(`${token.token}x`, token.hash, 'pepper')).toBe(false);
+    expect(verifyOpaqueToken(token.token, token.hash, 'different-pepper')).toBe(false);
     expect(verifyOpaqueToken(token.token, '00', 'pepper')).toBe(false);
   });
 });
@@ -52,6 +62,15 @@ describe('envelope encryption', () => {
     });
     expect(decryptSecret(encrypted, keyEncryptionKey)).toBe('secret-value');
     expect(() => decryptSecret({ ...encrypted, aad: 'project:other' }, keyEncryptionKey)).toThrow();
+    expect(() =>
+      encryptSecret({
+        aad: 'project:project-1:deepseek',
+        keyEncryptionKey: randomBytes(16),
+        keyVersion: 1,
+        plaintext: 'secret-value',
+      }),
+    ).toThrow('KEK_MUST_BE_32_BYTES');
+    expect(() => decryptSecret(encrypted, randomBytes(16))).toThrow('KEK_MUST_BE_32_BYTES');
   });
 });
 
@@ -84,12 +103,32 @@ describe('session JWTs', () => {
       sessionId: '3247b66f-e7aa-49cc-b373-370e6b99115f',
       sub: 'a3604805-6d34-466f-b288-205358362f25',
     };
-    const accessToken = await access.issue(identity);
-    const refreshToken = await refresh.issue({
-      ...identity,
-      familyId: '66d5a6ff-9d80-481c-abf2-b3a69724d83e',
-      jti: 'd1c54e35-18f7-4eed-b38e-80c244c2cc0a',
+    const issuedAt = new Date();
+    const accessToken = await access.issue(identity, issuedAt);
+    const refreshToken = await refresh.issue(
+      {
+        ...identity,
+        familyId: '66d5a6ff-9d80-481c-abf2-b3a69724d83e',
+        jti: 'd1c54e35-18f7-4eed-b38e-80c244c2cc0a',
+      },
+      issuedAt,
+    );
+
+    expect(decodeProtectedHeader(accessToken)).toMatchObject({
+      alg: 'EdDSA',
+      kid: 'access-v1',
+      typ: 'at+jwt',
     });
+    expect(decodeProtectedHeader(refreshToken)).toMatchObject({
+      alg: 'EdDSA',
+      kid: 'refresh-v1',
+      typ: 'rt+jwt',
+    });
+    const accessPayload = decodeJwt(accessToken);
+    const refreshPayload = decodeJwt(refreshToken);
+    expect((accessPayload.exp ?? 0) - (accessPayload.iat ?? 0)).toBe(10 * 60);
+    expect((refreshPayload.exp ?? 0) - (refreshPayload.iat ?? 0)).toBe(30 * 24 * 60 * 60);
+    expect(refresh.signingKeyId).toBe('refresh-v1');
 
     await expect(access.verify(accessToken)).resolves.toMatchObject({
       ...identity,
@@ -200,6 +239,27 @@ describe('session JWTs', () => {
       .setExpirationTime(now + 600)
       .sign(await importPKCS8(key.privateKeyPem, 'EdDSA'));
     await expect(verifier.verify(wrongTypeToken)).rejects.toThrow('JWT_TOKEN_TYPE_INVALID');
+
+    for (const invalid of [
+      { audience: 'wrong-audience', issuer: 'iworkspace', keyId: key.keyId },
+      { audience: 'iworkspace-access', issuer: 'wrong-issuer', keyId: key.keyId },
+      { audience: 'iworkspace-access', issuer: 'iworkspace', keyId: undefined },
+    ]) {
+      const invalidToken = await new SignJWT({ ...identity, tokenType: 'access' })
+        .setProtectedHeader({
+          alg: 'EdDSA',
+          ...(invalid.keyId === undefined ? {} : { kid: invalid.keyId }),
+          typ: 'at+jwt',
+        })
+        .setJti('d1c54e35-18f7-4eed-b38e-80c244c2cc0a')
+        .setSubject(identity.sub)
+        .setIssuer(invalid.issuer)
+        .setAudience(invalid.audience)
+        .setIssuedAt(now)
+        .setExpirationTime(now + 600)
+        .sign(await importPKCS8(key.privateKeyPem, 'EdDSA'));
+      await expect(verifier.verify(invalidToken)).rejects.toThrow();
+    }
   });
 });
 
@@ -214,38 +274,47 @@ describe('authorization and csrf', () => {
 
     expect(principalId(userSession)).toBe('session');
     expect(principalAuditMetadata(userSession)).toEqual({ subjectUserId: 'user' });
-    expect(
-      principalId({
-        organizationId: 'organization',
-        projectId: 'project',
-        scopes: ['review:trigger'],
-        tokenId: 'token',
-        type: 'PROJECT_TOKEN',
-      }),
-    ).toBe('token');
-    expect(
-      principalId({ organizationId: 'organization', systemId: 'worker', type: 'SYSTEM' }),
-    ).toBe('worker');
+    const projectToken = {
+      organizationId: 'organization',
+      projectId: 'project',
+      scopes: ['review:trigger'] as const,
+      tokenId: 'token',
+      type: 'PROJECT_TOKEN' as const,
+    };
+    expect(principalId(projectToken)).toBe('token');
+    expect(principalAuditMetadata(projectToken)).toEqual({});
+    const system = { organizationId: 'organization', systemId: 'worker', type: 'SYSTEM' as const };
+    expect(principalId(system)).toBe('worker');
+    expect(principalAuditMetadata(system)).toEqual({});
   });
 
   it('keeps project management with maintainers and organization admins', () => {
-    expect(
-      hasPermission({
-        organizationRole: 'MEMBER',
-        permission: 'project:manage',
-        projectRole: 'MAINTAINER',
-      }),
-    ).toBe(true);
-    expect(
-      hasPermission({
-        organizationRole: 'MEMBER',
-        permission: 'project:manage',
-        projectRole: 'REVIEWER',
-      }),
-    ).toBe(false);
-    expect(hasPermission({ organizationRole: 'ADMIN', permission: 'organization:manage' })).toBe(
-      true,
-    );
+    const permissions: readonly Permission[] = [
+      'organization:manage',
+      'project:manage',
+      'review:trigger',
+      'review:read',
+      'artifact:read',
+    ];
+    const expectedProjectPermissions: Readonly<
+      Record<(typeof projectRoles)[number], readonly Permission[]>
+    > = {
+      MAINTAINER: ['project:manage', 'review:trigger', 'review:read', 'artifact:read'],
+      REVIEWER: ['review:trigger', 'review:read', 'artifact:read'],
+      VIEWER: ['review:read', 'artifact:read'],
+    };
+
+    for (const organizationRole of organizationRoles) {
+      for (const permission of permissions) {
+        expect(hasPermission({ organizationRole, permission })).toBe(organizationRole !== 'MEMBER');
+        for (const projectRole of projectRoles) {
+          expect(hasPermission({ organizationRole, permission, projectRole })).toBe(
+            organizationRole !== 'MEMBER' ||
+              expectedProjectPermissions[projectRole].includes(permission),
+          );
+        }
+      }
+    }
   });
 
   it('requires the allowed origin and matching double-submit token', () => {
@@ -265,5 +334,13 @@ describe('authorization and csrf', () => {
         origin: 'https://app.example',
       }),
     ).toBe(false);
+    for (const invalid of [
+      { csrfCookie: 'csrf', csrfHeader: 'csrf', origin: 'https://other.example' },
+      { csrfCookie: undefined, csrfHeader: 'csrf', origin: 'https://app.example' },
+      { csrfCookie: 'csrf', csrfHeader: undefined, origin: 'https://app.example' },
+      { csrfCookie: undefined, csrfHeader: undefined, origin: undefined },
+    ]) {
+      expect(validateCsrf({ allowedOrigin: 'https://app.example', ...invalid })).toBe(false);
+    }
   });
 });

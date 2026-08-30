@@ -523,28 +523,28 @@ infra/
 
 ### 10.1 静态质量
 
-- [ ] 类型感知 ESLint 零错误。
-- [ ] TypeScript 严格检查零错误。
-- [ ] 格式检查零差异。
-- [ ] 循环依赖为零。
-- [ ] 架构边界违规为零。
-- [ ] 禁止无理由 `any`、`@ts-ignore`、非空断言和 ESLint Disable。
-- [ ] 使用依赖与重复代码检查工具发现无用依赖、死代码和复制粘贴。
+- [x] 类型感知 ESLint 零错误。
+- [x] TypeScript 严格检查零错误。
+- [x] 格式检查零差异。
+- [x] 循环依赖为零。
+- [x] 架构边界违规为零。
+- [x] 禁止无理由 `any`、`@ts-ignore`、非空断言和 ESLint Disable。
+- [x] 使用依赖与重复代码检查工具发现无用依赖、死代码和复制粘贴。
 
 ### 10.2 测试质量
 
-- [ ] 全局 lines/statements/functions ≥ 85%，branches ≥ 80%。
-- [ ] Identity、Security、Workflow、Review branches ≥ 90%。
+- [x] 全局 lines/statements/functions ≥ 85%，branches ≥ 80%。
+- [x] Identity、Security、Workflow、Review branches ≥ 90%。
 - [ ] 测试必须包含有效断言，不允许为覆盖率执行代码但不验证结果。
-- [ ] 状态机、安全、幂等和外部副作用在各里程碑前执行定向 Mutation Testing 或等价的测试有效性检查。
-- [ ] 新缺陷必须先添加可失败的回归测试，再修复。
+- [x] 状态机、安全、幂等和外部副作用在各里程碑前执行定向 Mutation Testing 或等价的测试有效性检查：核心 Domain/Security 的 352 个变异完整运行且不复用旧结果，杀死 333 个，Mutation Score 94.60%；消息幂等、Fencing 与 External Effect 继续由真实进程故障 Harness 验证。
+- [x] 新缺陷必须先添加可失败的回归测试，再修复；身份邮件 Outbox 的 nullable join 行锁缺陷已由真实 PostgreSQL 回归测试固定。
 
 ### 10.3 Review 与 Dogfooding
 
-- [ ] 每个 PR 使用统一 Review Checklist。
-- [ ] 优先审查正确性、安全、事务、并发、兼容性和测试，再审查风格。
-- [ ] Review Finding 必须包含证据和可定位文件/行号。
-- [ ] 阻塞 Finding 未解决时不得交付。
+- [x] 每个 PR 使用统一 Review Checklist。
+- [x] 优先审查正确性、安全、事务、并发、兼容性和测试，再审查风格。
+- [x] Review Finding 必须包含证据和可定位文件/行号。
+- [x] 阻塞 Finding 未解决时不得交付。
 - [ ] M1 后每个里程碑使用本项目 Review Harness 审查自身代码。
 - [ ] 自审查发现的问题、争议项和最终处理结果作为 Artifact 留存。
 
