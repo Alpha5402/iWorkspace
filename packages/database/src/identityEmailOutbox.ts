@@ -32,16 +32,6 @@ export async function claimIdentityEmailDeliveries(
     const databaseNow = await getDatabaseNow(transaction);
     const candidates = await transaction
       .selectFrom('identity_email_outbox')
-      .leftJoin(
-        'email_verification_tokens',
-        'email_verification_tokens.id',
-        'identity_email_outbox.verification_token_id',
-      )
-      .leftJoin(
-        'administrator_invitations',
-        'administrator_invitations.id',
-        'identity_email_outbox.administrator_invitation_id',
-      )
       .select([
         'identity_email_outbox.aad',
         'identity_email_outbox.attempt_count',
@@ -57,16 +47,6 @@ export async function claimIdentityEmailDeliveries(
         'identity_email_outbox.tag',
         'identity_email_outbox.wrap_iv',
         'identity_email_outbox.wrap_tag',
-        sql<boolean>`case
-          when identity_email_outbox.message_type = 'VERIFY_EMAIL' then
-            email_verification_tokens.consumed_at is null
-            and email_verification_tokens.superseded_at is null
-            and email_verification_tokens.expires_at > now()
-          when identity_email_outbox.message_type = 'ADMINISTRATOR_INVITATION' then
-            administrator_invitations.status = 'PENDING'
-            and administrator_invitations.expires_at > now()
-          else false
-        end`.as('credential_active'),
       ])
       .where((expression) =>
         expression.or([
@@ -99,11 +79,49 @@ export async function claimIdentityEmailDeliveries(
       .where('id', 'in', deliveryIds)
       .execute();
 
+    // Resolve credential state after claiming: PostgreSQL rejects FOR UPDATE when
+    // nullable outer joins are part of the locked query. The transaction keeps the
+    // claimed outbox rows locked while this read determines whether their linked
+    // one-time credentials are still usable.
+    const credentialStates = await transaction
+      .selectFrom('identity_email_outbox')
+      .leftJoin(
+        'email_verification_tokens',
+        'email_verification_tokens.id',
+        'identity_email_outbox.verification_token_id',
+      )
+      .leftJoin(
+        'administrator_invitations',
+        'administrator_invitations.id',
+        'identity_email_outbox.administrator_invitation_id',
+      )
+      .select([
+        'identity_email_outbox.id',
+        sql<boolean>`case
+          when identity_email_outbox.message_type = 'VERIFY_EMAIL' then
+            email_verification_tokens.consumed_at is null
+            and email_verification_tokens.superseded_at is null
+            and email_verification_tokens.expires_at > ${databaseNow}
+          when identity_email_outbox.message_type = 'ADMINISTRATOR_INVITATION' then
+            administrator_invitations.status = 'PENDING'
+            and administrator_invitations.expires_at > ${databaseNow}
+          else false
+        end`.as('credential_active'),
+      ])
+      .where('identity_email_outbox.id', 'in', deliveryIds)
+      .execute();
+    const credentialActiveByDeliveryId = new Map(
+      credentialStates.map((credentialState) => [
+        credentialState.id,
+        credentialState.credential_active,
+      ]),
+    );
+
     return candidates.map((candidate) => ({
       aad: candidate.aad,
       attemptCount: candidate.attempt_count + 1,
       ciphertext: candidate.ciphertext,
-      credentialActive: candidate.credential_active,
+      credentialActive: credentialActiveByDeliveryId.get(candidate.id) ?? false,
       encryptedDek: candidate.encrypted_dek,
       id: candidate.id,
       iv: candidate.iv,
