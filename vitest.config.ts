@@ -17,6 +17,7 @@ export default defineConfig({
         '**/cli/benchmarkReviewAcceptance.ts',
         '**/cli/bootstrapAdmin.ts',
         '**/cli/reliabilityDrill*.ts',
+        '**/cli/reviewCapacityBenchmark*.ts',
         '**/router.ts',
         '**/vite-env.d.ts',
       ],

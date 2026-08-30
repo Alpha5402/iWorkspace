@@ -231,6 +231,7 @@ infra/
 - [x] 实现 Transactional Outbox、Publisher Confirm、Consumer Inbox 和版本化 Event Envelope。
 - [x] RabbitMQ 声明 Review 队列、TTL、重试路由和 Dead-letter Exchange。
 - [x] 实现数据库时间 Lease、Heartbeat、Attempt、Fencing Token、Retry Wait、Lease Reaper 和容量租约。
+- [x] Provider 容量暂满时保持带心跳的 Task Lease 并使用短抖动轮询等待数据库容量租约，只有超过独立 180 秒 Deadline 才进入任务重试。不能把正常背压记作失败 Attempt：100 个活跃 Run 的实测曾造成 5 秒同步重试惊群并耗尽 3 次业务预算；等待会占用 Worker 消费槽并增加队列延迟，但换取不重复已完成批次、不放大 Token 成本和稳定收敛。
 - [x] Relay 所有权、重复消费、ACK/NACK、旧 Attempt 回写和延迟重试已有自动化测试。
 - [x] 失败任务查询与重放会生成新 Event ID，并保留 causationId。
 - [x] `RabbitMqBus` 在连接/Channel 关闭后使用有界退避重连，重新声明拓扑并恢复已注册消费者；真实重启 RabbitMQ 容器后，同一消费者进程无需重启即可继续发布和消费，演练前后队列均无遗留消息，脱敏证据归档于本地 `.workspace/proofs/`。
@@ -287,7 +288,7 @@ infra/
 - [x] 自动化覆盖重复投递、租约接管、Fencing、Head 变化、Provider 错误、Artifact 校验和 External Effect 协调。
 - [x] 建立 Review 接受路径容量 Harness：在一次性 PostgreSQL 上通过真实 HTTP API 完成 10,000 次触发，100 并发下 10,000/10,000 返回 `202`，保持 100 个活跃 Run，p95 128.29ms、吞吐 791.31 req/s；同时核对 Run/Task/Outbox/Audit 各 10,000 条、数据库无死锁/回滚/等待锁。脱敏运行证据归档于本地 `.workspace/proofs/`，该目录不提交仓库。
 - [x] 将 Worker 强杀、Fencing 接管、RabbitMQ 重启、真实 DLQ 与安全重放固化为可重复 Harness；默认连续两轮创建/迁移/删除隔离数据库，两轮均验证单一 External Effect、七类固定 Artifact、旧 Attempt 拒绝和全部队列归零。
-- [ ] 补齐 RabbitMQ 消费、Worker 执行/接管、Provider 限流与模型成本在内的端到端容量基线；上述接受路径数据不得冒充完整 Review 吞吐或 L3 证明。
+- [x] 建立完整 Review 容量 Harness：在一次性 PostgreSQL 上预置 100 个活跃 Run，以 8 个真实 Worker 进程、RabbitMQ 和 MinIO 完成四阶段 DAG；100/100 Run、400/400 Task/Inbox、300/300 Provider 调用、700 个 Artifact 与 100 个 External Effect 全部成功。Provider 全局/单项目并发稳定限制为 4/2，等待 p95 4.30s、零等待超时；`review.analyze` 峰值 88，主队列和 DLQ 最终归零；总耗时 25.89s。受控 Stub 记录 36k 输入/9k 输出 Token，按 2026-08-30 DeepSeek V4 Flash 峰值 cache-miss 价格推演约 `$0.02772`。该证据是本地真实基础设施基线，不包含真实 GitHub/DeepSeek 延迟、限额或实际账单，不冒充 L3 Provider 验收。
 - [ ] 使用真实 GitHub App、测试仓库和 DeepSeek 跑通 Webhook 与 Action Token 两条 L3 路径。
 - [ ] 运行本仓库 Dogfooding，并整理“需求 → 运行证据”的 M1 Proof Bundle。
 

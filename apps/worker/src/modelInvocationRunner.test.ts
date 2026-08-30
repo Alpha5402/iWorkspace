@@ -99,18 +99,46 @@ describe('ModelInvocationRunner', () => {
     ).resolves.toEqual({ error_code: 'MODEL_RATE_LIMITED', status: 'FAILED' });
   });
 
-  it('rejects when distributed provider capacity is exhausted before calling the model', async () => {
+  it('waits for distributed provider capacity without consuming a task retry', async () => {
+    vi.mocked(acquireProviderCapacityLease)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(0);
+    const reviewBatch = vi.fn<ReviewModelProvider['reviewBatch']>().mockResolvedValue({
+      inputHash: 'capacity-input-hash',
+      latencyMs: 10,
+      output: { findings: [], summary: 'Capacity acquired.' },
+      usage: {},
+    });
+    const runner = new ModelInvocationRunner(database, { reviewBatch }, () => Promise.resolve(), {
+      maximumPollMilliseconds: 0,
+      minimumPollMilliseconds: 0,
+      timeoutMilliseconds: 100,
+    });
+
+    await expect(runner.invoke(context)).resolves.toMatchObject({
+      inputHash: 'capacity-input-hash',
+    });
+    expect(acquireProviderCapacityLease).toHaveBeenCalledTimes(2);
+    expect(reviewBatch).toHaveBeenCalledOnce();
+    expect(releaseProviderCapacityLease).toHaveBeenCalledOnce();
+  });
+
+  it('fails after the independent provider capacity wait deadline', async () => {
     vi.mocked(acquireProviderCapacityLease).mockResolvedValueOnce(undefined);
     const reviewBatch = vi.fn<ReviewModelProvider['reviewBatch']>();
-    const runner = new ModelInvocationRunner(database, { reviewBatch }, () => Promise.resolve());
+    const runner = new ModelInvocationRunner(database, { reviewBatch }, () => Promise.resolve(), {
+      maximumPollMilliseconds: 0,
+      minimumPollMilliseconds: 0,
+      timeoutMilliseconds: 0,
+    });
 
-    await expect(runner.invoke(context)).rejects.toThrow('PROVIDER_CAPACITY_EXHAUSTED');
+    await expect(runner.invoke(context)).rejects.toThrow('PROVIDER_CAPACITY_WAIT_TIMEOUT');
     expect(reviewBatch).not.toHaveBeenCalled();
     expect(releaseProviderCapacityLease).not.toHaveBeenCalled();
     await expect(
       database.selectFrom('provider_invocations').select('error_code').executeTakeFirstOrThrow(),
     ).resolves.toEqual({
-      error_code: 'PROVIDER_CAPACITY_EXHAUSTED',
+      error_code: 'PROVIDER_CAPACITY_WAIT_TIMEOUT',
     });
   });
 

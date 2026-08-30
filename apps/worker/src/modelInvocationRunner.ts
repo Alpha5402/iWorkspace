@@ -23,11 +23,24 @@ type InvocationContext = Readonly<{
   runId: string;
 }>;
 
+type CapacityWaitOptions = Readonly<{
+  maximumPollMilliseconds: number;
+  minimumPollMilliseconds: number;
+  timeoutMilliseconds: number;
+}>;
+
+const DEFAULT_CAPACITY_WAIT: CapacityWaitOptions = {
+  maximumPollMilliseconds: 250,
+  minimumPollMilliseconds: 100,
+  timeoutMilliseconds: 180_000,
+};
+
 export class ModelInvocationRunner {
   public constructor(
     private readonly database: DeliveryDatabase,
     private readonly provider: ReviewModelProvider,
     private readonly assertLease: (lease: TaskLease) => Promise<void>,
+    private readonly capacityWait: CapacityWaitOptions = DEFAULT_CAPACITY_WAIT,
   ) {}
 
   public async invoke(
@@ -111,15 +124,24 @@ export class ModelInvocationRunner {
     context: InvocationContext,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const slot = await acquireProviderCapacityLease(this.database, {
-      attemptId: context.lease.attemptId,
-      globalLimit: 4,
-      leaseSeconds: 210,
-      projectId: context.projectId,
-      projectLimit: 2,
-      provider: 'deepseek',
-    });
-    if (slot === undefined) throw new Error('PROVIDER_CAPACITY_EXHAUSTED');
+    const deadline = Date.now() + this.capacityWait.timeoutMilliseconds;
+    const acquire = (): Promise<number | undefined> =>
+      acquireProviderCapacityLease(this.database, {
+        attemptId: context.lease.attemptId,
+        globalLimit: 4,
+        leaseSeconds: 210,
+        projectId: context.projectId,
+        projectLimit: 2,
+        provider: 'deepseek',
+      });
+    await this.assertLease(context.lease);
+    let slot = await acquire();
+    while (slot === undefined) {
+      if (Date.now() >= deadline) throw new Error('PROVIDER_CAPACITY_WAIT_TIMEOUT');
+      await delay(this.nextCapacityPollMilliseconds());
+      await this.assertLease(context.lease);
+      slot = await acquire();
+    }
     try {
       return await operation();
     } finally {
@@ -127,8 +149,18 @@ export class ModelInvocationRunner {
     }
   }
 
+  private nextCapacityPollMilliseconds(): number {
+    const range =
+      this.capacityWait.maximumPollMilliseconds - this.capacityWait.minimumPollMilliseconds;
+    return this.capacityWait.minimumPollMilliseconds + Math.floor(Math.random() * (range + 1));
+  }
+
   private errorCode(error: unknown): string {
     if (error instanceof ModelProviderError) return `MODEL_${error.code}`;
     return error instanceof Error ? error.message.slice(0, 120) : 'UNKNOWN_PROVIDER_ERROR';
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
