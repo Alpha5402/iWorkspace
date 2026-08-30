@@ -69,7 +69,10 @@ describe('ModelInvocationRunner', () => {
       providerResponseId: 'response-2',
     });
     expect(reviewBatch).toHaveBeenCalledTimes(2);
-    expect(reviewBatch.mock.calls[1]?.[0]).toMatchObject({ repairInstruction: 'missing findings' });
+    expect(reviewBatch.mock.calls[1]?.[0]).toMatchObject({
+      model: 'deepseek-v4-flash',
+      repairInstruction: 'missing findings',
+    });
     const invocations = await database
       .selectFrom('provider_invocations')
       .select(['status', 'error_code', 'provider_response_id'])

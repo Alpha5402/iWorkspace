@@ -60,6 +60,7 @@ describe('API configuration', () => {
       AUTH_REFRESH_PUBLIC_KEY_BASE64: Buffer.from(refreshPublicKey).toString('base64'),
       EMAIL_OUTBOX_KEK_BASE64: Buffer.alloc(32, 8).toString('base64'),
       EMAIL_OUTBOX_KEK_VERSION: '2',
+      DEEPSEEK_MODEL: 'deepseek-v4-pro',
       GITHUB_APP_ID: '123',
       GITHUB_APP_SLUG: 'iworkspace',
       GITHUB_PRIVATE_KEY_BASE64: Buffer.from(githubKey).toString('base64'),
@@ -92,6 +93,7 @@ describe('API configuration', () => {
       emailOutboxKey: { key: Buffer.alloc(32, 8), version: 2 },
       githubAppId: '123',
       githubPrivateKeyPem: githubKey,
+      reviewModel: 'deepseek-v4-pro',
       secretKeyEncryptionKey: Buffer.alloc(32, 7),
     });
   });

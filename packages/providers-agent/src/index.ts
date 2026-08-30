@@ -23,6 +23,7 @@ export type ReviewModelOutput = z.infer<typeof ReviewModelOutputSchema>;
 export type ReviewModelRequest = Readonly<{
   category: 'DESIGN' | 'IMPLEMENTATION' | 'DEFECT';
   diff: string;
+  model: string;
   promptVersion: string;
   repairInstruction?: string;
   rules: readonly Readonly<{
@@ -84,7 +85,6 @@ type FetchLike = typeof fetch;
 export class DeepSeekResponsesProvider implements ReviewModelProvider {
   public constructor(
     private readonly apiKey: string,
-    private readonly model = 'deepseek-v4-flash',
     private readonly endpoint = 'https://api.deepseek.com/responses',
     private readonly fetchImplementation: FetchLike = fetch,
   ) {}
@@ -101,7 +101,7 @@ export class DeepSeekResponsesProvider implements ReviewModelProvider {
       response = await this.fetchImplementation(this.endpoint, {
         body: JSON.stringify({
           input,
-          model: this.model,
+          model: request.model,
           reasoning: { effort: 'high' },
           text: {
             format: {

@@ -56,6 +56,7 @@ const m1Runtime =
           database,
           config.m1.tokenPepper,
           config.m1.secretKeyEncryptionKey,
+          config.m1.reviewModel,
         ),
         github: new GitHubAppProvider(config.m1.githubAppId, config.m1.githubPrivateKeyPem),
         githubAppSlug: config.m1.githubAppSlug,

@@ -5,6 +5,7 @@ import { DeepSeekResponsesProvider, ModelProviderError } from './index.js';
 const request = {
   category: 'DEFECT' as const,
   diff: '@@ -1 +1 @@\n-old\n+new',
+  model: 'deepseek-v4-flash',
   promptVersion: 'review-v1',
   rules: [
     {
@@ -41,7 +42,6 @@ describe('DeepSeekResponsesProvider', () => {
     );
     const result = await new DeepSeekResponsesProvider(
       'secret',
-      'deepseek-v4-flash',
       'https://test',
       fetchMock,
     ).reviewBatch(request);
@@ -60,12 +60,7 @@ describe('DeepSeekResponsesProvider', () => {
         new Response('sensitive upstream body', { headers: { 'retry-after': '7' }, status: 429 }),
       );
     await expect(
-      new DeepSeekResponsesProvider(
-        'secret',
-        'deepseek-v4-flash',
-        'https://test',
-        fetchMock,
-      ).reviewBatch(request),
+      new DeepSeekResponsesProvider('secret', 'https://test', fetchMock).reviewBatch(request),
     ).rejects.toEqual(expect.objectContaining({ code: 'RATE_LIMITED', retryAfterSeconds: 7 }));
   });
 
@@ -74,26 +69,20 @@ describe('DeepSeekResponsesProvider', () => {
       .fn<typeof fetch>()
       .mockRejectedValue(new DOMException('aborted', 'AbortError'));
     await expect(
-      new DeepSeekResponsesProvider('secret', 'model', 'https://test', aborted).reviewBatch(
-        request,
-      ),
+      new DeepSeekResponsesProvider('secret', 'https://test', aborted).reviewBatch(request),
     ).rejects.toMatchObject({ code: 'TIMEOUT' });
     const disconnected = vi.fn<typeof fetch>().mockRejectedValue(new Error('socket secret'));
     await expect(
-      new DeepSeekResponsesProvider('secret', 'model', 'https://test', disconnected).reviewBatch(
-        request,
-      ),
+      new DeepSeekResponsesProvider('secret', 'https://test', disconnected).reviewBatch(request),
     ).rejects.toMatchObject({ code: 'PROVIDER_FAILURE' });
     const unavailable = vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 503 }));
     await expect(
-      new DeepSeekResponsesProvider('secret', 'model', 'https://test', unavailable).reviewBatch(
-        request,
-      ),
+      new DeepSeekResponsesProvider('secret', 'https://test', unavailable).reviewBatch(request),
     ).rejects.toMatchObject({ code: 'PROVIDER_FAILURE' });
     const limited = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response('', { headers: { 'retry-after': 'later' }, status: 429 }));
-    const error = await new DeepSeekResponsesProvider('secret', 'model', 'https://test', limited)
+    const error = await new DeepSeekResponsesProvider('secret', 'https://test', limited)
       .reviewBatch(request)
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ModelProviderError);
@@ -124,7 +113,6 @@ describe('DeepSeekResponsesProvider', () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(body)));
     const failure: unknown = await new DeepSeekResponsesProvider(
       'secret',
-      'model',
       'https://test',
       fetchMock,
     )
@@ -155,7 +143,6 @@ describe('DeepSeekResponsesProvider', () => {
     const signal = new AbortController().signal;
     const result = await new DeepSeekResponsesProvider(
       'secret',
-      'model',
       'https://test',
       fetchMock,
     ).reviewBatch({ ...request, repairInstruction: 'findings must be an array' }, signal);

@@ -19,7 +19,7 @@ type InvocationContext = Readonly<{
   organizationId: string;
   projectId: string;
   promptVersion: string;
-  request: ReviewModelRequest;
+  request: Omit<ReviewModelRequest, 'model'>;
   runId: string;
 }>;
 
@@ -38,6 +38,7 @@ export class ModelInvocationRunner {
       await this.assertLease(context.lease);
       const request = {
         ...context.request,
+        model: context.model,
         ...(repairInstruction === undefined ? {} : { repairInstruction }),
       };
       const invocation = await this.database

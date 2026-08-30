@@ -259,6 +259,7 @@ infra/
 - [x] Design、Implementation、Defect 分类 Review 与高严重度二次 Verify 已接入 DAG。
 - [x] Finding 位置、Evidence、Fingerprint、去重、降级/争议/拒绝规则均有确定性校验。
 - [x] 保存模型、Prompt/Schema 版本、输入哈希、Response ID、用量、耗时和错误分类，不保存思维链。
+- [x] 模型由 API 部署配置选择并在创建 Review Run 时冻结；Worker 只使用 Run 携带的模型调用 Provider，避免 API 记录与实际调用因进程配置不同而产生血缘漂移。暂不允许项目或触发请求自行选模型，以保持配额、成本和供应商兼容性边界集中可控。
 - [x] Stub 覆盖非法输出修复、重复结果、429、5xx、超时和非重试错误。
 - [ ] 使用真实 `DEEPSEEK_API_KEY` 完成显式开启的 Provider E2E。
 

@@ -56,6 +56,7 @@ export class ControlPlaneService {
     private readonly database: DeliveryDatabase,
     private readonly tokenPepper: string,
     private readonly keyEncryptionKey?: Buffer,
+    private readonly reviewModel = 'deepseek-v4-flash',
   ) {}
 
   public async listProjects(actor: UserSessionPrincipal): Promise<
@@ -1368,7 +1369,7 @@ export class ControlPlaneService {
           diff_hash: null,
           head_sha: input.headSha,
           id: candidateRunId,
-          model: 'deepseek-v4-flash',
+          model: this.reviewModel,
           organization_id: repository.organization_id,
           project_id: repository.project_id,
           prompt_version: 'review-v1',
@@ -1523,7 +1524,7 @@ export class ControlPlaneService {
         diff_hash: null,
         head_sha: null,
         id: candidateRunId,
-        model: 'deepseek-v4-flash',
+        model: this.reviewModel,
         organization_id: actor.organizationId,
         project_id: projectId,
         prompt_version: 'review-v1',

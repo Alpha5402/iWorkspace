@@ -13,6 +13,7 @@ import { ControlPlaneService } from './controlPlaneService.js';
 import { PublicAuthRateLimiter } from './publicAuthRateLimiter.js';
 
 const PEPPER = 'control-plane-test-token-pepper';
+const REVIEW_MODEL = 'deepseek-test-model';
 
 function tokenServices(): Readonly<{
   access: AccessTokenService;
@@ -83,7 +84,7 @@ describe('ControlPlaneService', () => {
       password: 'correct horse battery staple',
     });
     actor = await auth.verifyAccessToken(session.accessToken);
-    control = new ControlPlaneService(database, PEPPER, Buffer.alloc(32, 7));
+    control = new ControlPlaneService(database, PEPPER, Buffer.alloc(32, 7), REVIEW_MODEL);
   });
 
   afterEach(async () => {
@@ -320,6 +321,13 @@ describe('ControlPlaneService', () => {
     );
 
     expect(duplicate).toEqual(first);
+    await expect(
+      database
+        .selectFrom('review_runs')
+        .select('model')
+        .where('id', '=', first.runId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ model: REVIEW_MODEL });
     await expect(control.listReviews(actor, project.id)).resolves.toHaveLength(1);
     await expect(control.listRunEvents(actor, first.runId, 0)).resolves.toHaveLength(1);
     await expect(database.selectFrom('tasks').select('id').execute()).resolves.toHaveLength(1);
@@ -415,6 +423,14 @@ describe('ControlPlaneService', () => {
 
     expect(first.runId).toBeDefined();
     expect(sameCommit.runId).toBe(first.runId);
+    if (first.runId === undefined) throw new Error('EXPECTED_WEBHOOK_REVIEW_RUN');
+    await expect(
+      database
+        .selectFrom('review_runs')
+        .select('model')
+        .where('id', '=', first.runId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ model: REVIEW_MODEL });
     await expect(database.selectFrom('review_runs').select('id').execute()).resolves.toHaveLength(
       1,
     );

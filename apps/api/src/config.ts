@@ -4,6 +4,7 @@ const ApiConfigSchema = z.object({
   API_HOST: z.string().min(1).default('127.0.0.1'),
   API_PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   DATABASE_URL: z.url(),
+  DEEPSEEK_MODEL: z.string().min(1).default('deepseek-v4-flash'),
   LOG_LEVEL: z.string().min(1).default('info'),
   M1_ENABLED: z.enum(['true', 'false']).default('false'),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url(),
@@ -47,6 +48,7 @@ export type ApiConfig = Readonly<{
     githubAppId: string;
     githubPrivateKeyPem: string;
     githubWebhookSecret: string;
+    reviewModel: string;
     tokenPepper: string;
     secretKeyEncryptionKey: Buffer;
     webOrigin: string;
@@ -101,6 +103,7 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv): ApiConfig {
             config.GITHUB_WEBHOOK_SECRET,
             'GITHUB_WEBHOOK_SECRET',
           ),
+          reviewModel: config.DEEPSEEK_MODEL,
           tokenPepper: requireM1Value(config.TOKEN_PEPPER, 'TOKEN_PEPPER'),
           secretKeyEncryptionKey: decodeKey(config.SECRET_KEK_BASE64, 'SECRET_KEK_BASE64'),
           webOrigin: requireM1Value(config.WEB_ORIGIN, 'WEB_ORIGIN'),
