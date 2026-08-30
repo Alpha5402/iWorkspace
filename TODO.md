@@ -234,7 +234,7 @@ infra/
 - [x] Relay 所有权、重复消费、ACK/NACK、旧 Attempt 回写和延迟重试已有自动化测试。
 - [x] 失败任务查询与重放会生成新 Event ID，并保留 causationId。
 - [x] `RabbitMqBus` 在连接/Channel 关闭后使用有界退避重连，重新声明拓扑并恢复已注册消费者；真实重启 RabbitMQ 容器后，同一消费者进程无需重启即可继续发布和消费，演练前后队列均无遗留消息，脱敏证据归档于本地 `.workspace/proofs/`。
-- [ ] 在真实多进程环境执行 Worker 强杀、Broker 中断和 DLQ 人工重放演练。
+- [x] 完成真实多进程恢复演练：Worker A 在持有 `ACQUIRE_SOURCE` 租约时被 `SIGKILL`，Lease Reaper 递增 Fencing Token 后由 Worker B 接管并完成整条 Review DAG，旧 Attempt 回写被拒绝；畸形消息真实进入 `review.acquire.dlq`，人工取出后基于数据库 Task 事实以新 Event ID 重建，`causationId` 指向原死信，重复业务执行由 Inbox/Task 状态拒绝；结合 RabbitMQ 容器重启演练，最终全部业务队列和 DLQ 均无遗留消息，脱敏 Proof 归档于本地 `.workspace/proofs/`。
 
 ### M1-05：Artifact 与 Evidence
 
